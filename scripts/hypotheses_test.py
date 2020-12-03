@@ -78,6 +78,7 @@ class Hypothesis:
         self.sites_substitutions = {}
         self.editing_rates_by_ancestral_state = {}
         self.editing_levels_distribution_by_ancestral_state = {}
+        self.dnds_dict = {}
         self.editing_level_method = None
         self.General_model = self.create_General_model()
         self.HPM = self.create_Harm_permitting_model()
@@ -157,6 +158,7 @@ class Hypothesis:
         self.sites_substitutions = {}
         self.editing_rates_by_ancestral_state = {}
         self.editing_levels_distribution_by_ancestral_state = {}
+        self.dnds_dict = {}
         self.editing_level_method = None
         self.General_model = self.create_General_model()
         self.HPM = self.create_Harm_permitting_model()
@@ -254,11 +256,11 @@ class Hypothesis:
             mutated_non_syn = total_nonsyn[total_nonsyn[end_nod+'_nuc']==mutated_end_nod_nucl]         
             if branch in self.rates:
                 if mm in self.rates[branch]:
-                    self.rates[branch][mm]=(('syn', float(len(mutated_syn)), float(len(mutated_syn))/float(len(total_syn))), ('nonsyn', float(len(mutated_non_syn)), float(len(mutated_non_syn))/float(len(total_nonsyn))))
+                    self.rates[branch][mm]=(('syn', float(len(mutated_syn)), float(len(mutated_syn))/float(len(total_syn)), float(total_syn)), ('nonsyn', float(len(mutated_non_syn)), float(len(mutated_non_syn))/float(len(total_nonsyn)), float(total_nonsyn)))
                 else:
-                    self.rates[branch].update({mm:(('syn', float(len(mutated_syn)), float(len(mutated_syn))/float(len(total_syn))), ('nonsyn', float(len(mutated_non_syn)), float(len(mutated_non_syn))/float(len(total_nonsyn))))})
+                    self.rates[branch].update({mm:(('syn', float(len(mutated_syn)), float(len(mutated_syn))/float(len(total_syn)), float(total_syn)), ('nonsyn', float(len(mutated_non_syn)), float(len(mutated_non_syn))/float(len(total_nonsyn)), float(total_nonsyn)))})
             else:
-                self.rates.update({branch:{mm:(('syn', float(len(mutated_syn)), float(len(mutated_syn))/float(len(total_syn))), ('nonsyn', float(len(mutated_non_syn)), float(len(mutated_non_syn))/float(len(total_nonsyn))))}})
+                self.rates.update({branch:{mm:(('syn', float(len(mutated_syn)), float(len(mutated_syn))/float(len(total_syn)), float(total_syn)), ('nonsyn', float(len(mutated_non_syn)), float(len(mutated_non_syn))/float(len(total_nonsyn)), float(total_nonsyn)))}})
     
     
     def get_groups_of_edited_and_unedited_sites(self):
@@ -415,6 +417,9 @@ class Hypothesis:
             elif data=='editing_ancestral_rates':
                 data_frame=pd.concat([s for s in self.editing_rates_by_ancestral_state.values()], axis=1, sort=False).transpose()
                 write(file_type, data_frame, path, file_name, sub_name=sub_name)
+            elif data=='dnds':
+                data_frame=pd.concat([s for s in self.dnds_dict.values()], axis=1, sort=False).transpose()
+                write(file_type, data_frame, path, file_name, sub_name=sub_name)
             
             elif data=='sites_substitutions':
                 data_frame=pd.concat([s for s in self.sites_substitutions.values()], axis=1, sort=False).transpose()
@@ -433,6 +438,7 @@ class Hypothesis:
                 elif file_type=='csv':
                     for k,s in self.editing_levels_distribution_by_ancestral_state.items():
                         s.to_csv(path+file_name+'_'+k, sep='\t')
+                            
             
             
     def collect_sites_rates_in_intermediate_nodes(self, ancestors,intermediate,editing_level_method='average',editing_levels=[0,0.05],original_nucl='A',target_nucl='G'):
@@ -856,14 +862,48 @@ class Hypothesis:
                 self.hpm.editing_levels_distribution_by_ancestral_state.update({name+'_nonsyn_res_species_specific':mat[np.logical_and(np.logical_and(mat['editing_type']=='res',mat[common_ancestor+'_'+leaf_original_nucl+leaf_target_nucl+'_recoding']==1),mat['edited_animals']==len(leaves))]['combined_editing_level']})
                 self.hpm.editing_levels_distribution_by_ancestral_state.update({name+'_nonsyn_div_species_specific':mat[np.logical_and(np.logical_and(mat['editing_type']=='div',mat[common_ancestor+'_'+leaf_original_nucl+leaf_target_nucl+'_recoding']==1),mat['edited_animals']==len(leaves))]['combined_editing_level']})
                 
+                
+        def calc_dnds_to_leaves(self, ancestor, ancestor_nucl, leaves_nucl, leaves=['oct','bim','sep','squ','bob','lin']):
+            
+            def nucl_is_mutated(row, leaves, leaves_nucl):
+                mutated = 0
+                if type(leaves)==list or type(leaves)==tuple:
+                    for l in leaves:
+                        if row[l+'_nuc']==leaves_nucl:
+                            mutated+=1
+                elif type(leaves)==str:
+                    if row[leaves+'_nuc']==leaves_nucl:
+                        mutated+=1
+                return mutated
+                    
     
+            mat = self.hpm.nucl_mat[self.hpm.nucl_mat[ancestor+'_nuc']==ancestor_nucl].copy()
+            mat['mutated'] = mat.apply(lambda row: nucl_is_mutated(row,leaves,leaves_nucl),axis=1)
+            mutated_nucls = mat[mat['mutated']>0]
+            
+            syn_nucl = len(mat[mat[ancestor+'_'+ancestor_nucl+leaves_nucl+'_recoding']==0])
+            nonsyn_nucl = len(mat[mat[ancestor+'_'+ancestor_nucl+leaves_nucl+'_recoding']==1])
+            syn_mutated = len(mutated_nucls[mutated_nucls[ancestor+'_'+ancestor_nucl+leaves_nucl+'_recoding']==0])
+            nonsyn_mutated = len(mutated_nucls[mutated_nucls[ancestor+'_'+ancestor_nucl+leaves_nucl+'_recoding']==1])
+            
+            if type(leaves)==list or type(leaves)==tuple:
+                leaves_name = '_'.join(leaves)
+            elif type(leaves)==str:
+                leaves_name = leaves
+            name = ancestor+'_to_'+leaves_name+'_'+ancestor_nucl+leaves_nucl
+            
+            data = (syn_nucl,nonsyn_nucl,syn_mutated,nonsyn_mutated)
+            index = ('syn_nucl','nonsyn_nucl','syn_mutated','nonsyn_mutated')
+            
+            self.hpm.dnds_dict.update({name:pd.Series(data=data,index=index,name=name)})
+            
+            
         
     def create_General_model(self):
         return Hypothesis.General_model(self)
     class General_model:
         def __init__(self, hypothoesis):
             self.general_model = hypothoesis
-            
             
              
         def strict(self, ancestor, intermediate, leaf, leaf_nucl, edited_leaves=None, non_edited_leaves=None, editing_level_method='average', strong_levels=[0.1,1], confidence_level=0.95, n_random=1000000, sites_recalculation = True):
@@ -1128,16 +1168,16 @@ if __name__=='__main__':
     
     nucl_mat_file = sys.argv[1]
     tree=sys.argv[2]
-    ancestor = sys.argv[3]
-    intermediate = sys.argv[4]
-    leaf = sys.argv[5]
+    # ancestor = sys.argv[3]
+    # intermediate = sys.argv[4]
+    # leaf = sys.argv[5]
     # leaf_mutated_nucl = sys.argv[6]
     # ancestor_nucl = sys.argv[7]
-    ancestor_nucl = None
+    # ancestor_nucl = None
     # leaf_mutated_nucl = 'G'
-    only_N1=True
-    if ancestor_nucl=='None':
-        ancestor_nucl=None
+    # only_N1=True
+    # if ancestor_nucl=='None':
+    #     ancestor_nucl=None
     
     trees={'coleoids_rooted':"((oct,bim)O,((sep,squ)S,(bob,lin)B)D)C",
            'coleoids_unrooted':"((oct,bim)O,(sep,squ)S,(bob,lin)B)C",
@@ -1156,6 +1196,23 @@ if __name__=='__main__':
         animals=['oct','bim','sep','squ','bob','lin']
     elif 'no_boblin' in tree:
         animals=['apl','nau','oct','bim','sep','squ']
+        
+    outpath = '/'.join(nucl_mat_file.split('/')[0:-1])+'/'
+    print('Reading matrix')
+    nucl_mat=pd.read_csv(nucl_mat_file,sep='\t',error_bad_lines=False, index_col=False, dtype='unicode')
+    nucl_mat=nucl_mat.apply(pd.to_numeric, errors='ignore')
+    print(str(len(nucl_mat)) + ' rows in nucl matrix')
+    
+    hyp=Hypothesis(nucl_mat.copy(),tree_str=newick_tree_str)
+    hpm=Hypothesis.HPM(hyp)
+    hpm.calc_dnds_to_leaves('C', 'G', 'A')
+    hpm.calc_dnds_to_leaves('C', 'G', 'C')
+    hpm.calc_dnds_to_leaves('C', 'G', 'T')
+    hpm.calc_dnds_to_leaves('C', 'C', 'A')
+    hpm.calc_dnds_to_leaves('C', 'T', 'A')
+    hpm.hpm.write_data(outpath,file_name='dnds',data_to_write=['dnds'],file_type='csv',sub_name='')
+
+    
         
     
 # =============================================================================
@@ -1564,33 +1621,36 @@ if __name__=='__main__':
 # =============================================================================
     
     
-    outpath = '/'.join(nucl_mat_file.split('/')[0:-1])+'/'
-    print('Reading matrix')
-    nucl_mat=pd.read_csv(nucl_mat_file,sep='\t',error_bad_lines=False, index_col=False, dtype='unicode')
-    nucl_mat=nucl_mat.apply(pd.to_numeric, errors='ignore')
-    print(str(len(nucl_mat)) + ' rows in nucl matrix')
+# =============================================================================
+#     outpath = '/'.join(nucl_mat_file.split('/')[0:-1])+'/'
+#     print('Reading matrix')
+#     nucl_mat=pd.read_csv(nucl_mat_file,sep='\t',error_bad_lines=False, index_col=False, dtype='unicode')
+#     nucl_mat=nucl_mat.apply(pd.to_numeric, errors='ignore')
+#     print(str(len(nucl_mat)) + ' rows in nucl matrix')
+#     
+#     if ancestor_nucl is not None:
+#         if 'unrooted' in tree:
+#             nucl_mat = nucl_mat[nucl_mat['N0_nuc']==ancestor_nucl].copy()
+#         elif 'rooted' in tree:
+#             if only_N1:
+#                 nucl_mat = nucl_mat[nucl_mat['N1_nuc']==ancestor_nucl].copy()
+#             else:
+#                 nucl_mat = nucl_mat[np.logical_or(nucl_mat['N1_nuc']==ancestor_nucl,nucl_mat['N0_nuc']==ancestor_nucl)].copy()
+#     
+#     file_name='mutations_count_in_edited_unedited_sites_'+ancestor+'_'+intermediate+'_'+leaf
+#     iden_filter_cols = [col for col in nucl_mat.columns if ('aa_range' in col and leaf not in col and all([a in col for a in animals if a!=leaf ]))]
+#     filter_col = [c for c in iden_filter_cols if str(10) in c][0] 
+#     filtered_nucl_mat = nucl_mat[nucl_mat[filter_col]>=0.3].copy()
+#     hyp=Hypothesis(filtered_nucl_mat,tree_str=newick_tree_str)
+#     gm = Hypothesis.General_model(hyp)
+#     gm.compare_edited_and_unedited_substitution(ancestor, intermediate, leaf, intermediate_nucl='A', leaf_nucl='G', syn=True)
+#     gm.compare_edited_and_unedited_substitution(ancestor, intermediate, leaf, intermediate_nucl='A', leaf_nucl='C', syn=False)
+#     gm.compare_edited_and_unedited_substitution(ancestor, intermediate, leaf, intermediate_nucl='A', leaf_nucl='T', syn=False)
+#     gm.general_model.write_data(outpath,file_name=file_name,file_type='csv',data_to_write = ['mutations_count'])
+# =============================================================================
     
-    if ancestor_nucl is not None:
-        if 'unrooted' in tree:
-            nucl_mat = nucl_mat[nucl_mat['N0_nuc']==ancestor_nucl].copy()
-        elif 'rooted' in tree:
-            if only_N1:
-                nucl_mat = nucl_mat[nucl_mat['N1_nuc']==ancestor_nucl].copy()
-            else:
-                nucl_mat = nucl_mat[np.logical_or(nucl_mat['N1_nuc']==ancestor_nucl,nucl_mat['N0_nuc']==ancestor_nucl)].copy()
     
-    file_name='mutations_count_in_edited_unedited_sites_'+ancestor+'_'+intermediate+'_'+leaf
-    iden_filter_cols = [col for col in nucl_mat.columns if ('aa_range' in col and leaf not in col and all([a in col for a in animals if a!=leaf ]))]
-    filter_col = [c for c in iden_filter_cols if str(10) in c][0] 
-    filtered_nucl_mat = nucl_mat[nucl_mat[filter_col]>=0.3].copy()
-    hyp=Hypothesis(filtered_nucl_mat,tree_str=newick_tree_str)
-    gm = Hypothesis.General_model(hyp)
-    gm.compare_edited_and_unedited_substitution(ancestor, intermediate, leaf, intermediate_nucl='A', leaf_nucl='G', syn=True)
-    gm.compare_edited_and_unedited_substitution(ancestor, intermediate, leaf, intermediate_nucl='A', leaf_nucl='C', syn=False)
-    gm.compare_edited_and_unedited_substitution(ancestor, intermediate, leaf, intermediate_nucl='A', leaf_nucl='T', syn=False)
-    gm.general_model.write_data(outpath,file_name=file_name,file_type='csv',data_to_write = ['mutations_count'])
-    
-    
+
     
 # =============================================================================
 #     arguments_groups=[('C','D','sep',[('lin','bob','oct','bim')]),

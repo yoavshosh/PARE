@@ -393,14 +393,7 @@ def collect_results_for_hpm_and_plot_probs(path,animals,conserved_groups):
                 align=0
             else:
                 align=-0.15
-#            if ps=='****':
-#                align = -0.1
-#            if ps=='***': 
-#                align = -0.04
-#            if ps=='**' or ps=='ns': 
-#                align = 0.01
-#            if ps=='*':
-#                align = 0.06
+
             plt.text(t+align,max_y*1.1,pval_str(df.loc[labels[i].get_text(),'all_sites_pval']),size=10)
         plt.savefig(path+'species_specific_'+name+'_types_rates.png')
         plt.close()
@@ -483,14 +476,7 @@ def collect_results_for_hpm_and_plot_probs(path,animals,conserved_groups):
             axes[i].axhline(y=ylim-0.05,xmin=0.45,xmax=0.9,c="black",linewidth=0.5)
             
             align=-0.4
-#            if pval_s=='****':
-#                align = -0.1
-#            if pval_s=='***': 
-#                align = 0
-#            if pval_s=='**' or pval_s=='ns': 
-#                align = 0
-#            if pval_s=='*':
-#                align = 0
+
             
             axes[i].text(2.35+align,ylim-0.045,pval_s,size=15)
 #            plt.xticks(rotation=90)
@@ -949,7 +935,7 @@ def create_tree_relations_dicts(tree_str, is_str=False):
                     upstream_ancestors+=(n.name,)
                 ancestors_to_upstream_ancestors_dict.update({a.name:upstream_ancestors})
     
-    return leaves_to_ancestors_dict, ancestors_to_leaves_dict, ancestors_to_downstream_ancestors_dict, ancestors_to_upstream_ancestors_dict
+    return tree, leaves_to_ancestors_dict, ancestors_to_leaves_dict, ancestors_to_downstream_ancestors_dict, ancestors_to_upstream_ancestors_dict
                 
 #def plot_p_values_matrix(path,name,models_dict,intermediates_to_group = ['S','B']):
 #    
@@ -1292,64 +1278,8 @@ def calc_substitutions_per_editing_type(sites_df,levels_ranges,intermediate,anim
     return sites_df, rates, data_df
 
 
-# =============================================================================
-# def get_groups_of_edited_and_unedited_sites(self):
-#     
-# #        ancestor = self.ancestor
-# #        intermediate = self.intermediate
-# #        leaf = self.leaf
-# #        assert any([a is not None for a in [ancestor,intermediate,leaf]]), "node are not defined (ancestor,intermediate,leaf). define nodes using self.define_nodes function"
-# #        assert (leaf in self.ancestors_to_leaves_dict[intermediate]), leaf+" is not descended from "+intermediate
-# #        assert (leaf in self.ancestors_to_leaves_dict[ancestor]), leaf+" is not descended from "+ancestor
-# #        assert (intermediate in self.ancestors_to_downstream_ancestors_dict[ancestor]), intermediate+" is not descended from "+ancestor
-# #    
-# #        edited_intermediate_children = [l for l in self.ancestors_to_leaves_dict[intermediate] if all([k not in set.intersection(set(self.ancestors_to_downstream_ancestors_dict[intermediate]),set(self.leaves_to_ancestors_dict[leaf])) for k in self.leaves_to_ancestors_dict[l]]) and l!=leaf]
-# #        edited_leaves=[]
-# #        ancestors_from_ancestor_to_intermediate = [a for a in self.ancestors_to_downstream_ancestors_dict[ancestor] if (a not in self.ancestors_to_downstream_ancestors_dict[intermediate] and a!=intermediate and intermediate in self.ancestors_to_downstream_ancestors_dict[a])]
-# #        edited_leaves_outside_intermediate = []
-# #        for a in ancestors_from_ancestor_to_intermediate:
-# #            edited_leaves_outside_intermediate += [l for l in self.ancestors_to_leaves_dict[a] if l not in self.ancestors_to_leaves_dict[intermediate]]    
-# #        edited_leaves += list(it.product(edited_intermediate_children, list(set(edited_leaves_outside_intermediate))))
-# #        self.edited_leaves = [x for x in edited_leaves if x]
-# #    
-# #        non_edited_leaves = []
-# #        for a in self.ancestors_to_leaves_dict[self.tree.root.name]:
-# #            if a not in self.ancestors_to_leaves_dict[intermediate] and all([a not in self.ancestors_to_leaves_dict[m] for m in ancestors_from_ancestor_to_intermediate]):
-# #                non_edited_leaves.append(a)
-# #        self.non_edited_leaves = non_edited_leaves
-#         
-#     groups_for_product=[]
-#     other_intermediate_leaves=[l for l in ancestors_to_leaves_dict[intermediate] if l!=leaf and all([k not in set.intersection(set(ancestors_to_downstream_ancestors_dict[intermediate]),set(leaves_to_ancestors_dict[leaf])) for k in leaves_to_ancestors_dict[l]])]
-#     downstream_to_intermediate_ancestors=ancestors_to_downstream_ancestors_dict[intermediate]
-#     upstream_to_intermediate_ancestor=[ance for ance in ancestors_to_upstream_ancestors_dict[intermediate] if ance not in ancestors_to_upstream_ancestors_dict[ancestor]]
-#     for ance in downstream_to_intermediate_ancestors:
-#         if ance not in leaves_to_ancestors_dict[leaf]:
-#             groups_for_product.append(ancestors_to_leaves_dict[ance])
-#     outside_intermediate_leafs=[]
-#     for ance in upstream_to_intermediate_ancestor:
-#         outside_intermediate_leafs+=[l for l in ancestors_to_leaves_dict[ance] if l not in ancestors_to_leaves_dict[intermediate]]
-#     outside_intermediate_leafs=list(set(outside_intermediate_leafs))
-#     if len(outside_intermediate_leafs):
-#         groups_for_product.append(outside_intermediate_leafs)
-#     leaves_for_product=[l for group in groups_for_product for l in group]
-#     edited_leaves=[]
-#     for l in other_intermediate_leaves:
-#         for m in leaves_for_product:
-#             if l!=m and not len(set.intersection(set(leaves_to_ancestors_dict[l]),set(leaves_to_ancestors_dict[m]),set(ancestors_to_downstream_ancestors_dict[intermediate]))):
-#                 edited_leaves.append(tuple(sorted([l,m])))
-#     edited_leaves = list(set(edited_leaves))
-#     edited_leaves = [x for x in edited_leaves if x]
-#     
-#     non_edited_leaves = []
-#     all_ancestors_leaves=ancestors_to_leaves_dict[ancestor]
-#     all_root_leaves=ancestors_to_leaves_dict[tree.root.name]
-#     for l in all_root_leaves:
-#         if l not in all_ancestors_leaves:
-#             non_edited_leaves.append(l)
-#     non_edited_leaves = non_edited_leaves
-#     
-#     return edited_leaves, non_edited_leaves
-# =============================================================================
+
+
     
 def get_all_groups_of_edited_sites(tree_str,ancestor,animals=['oct','bim','sep','squ','lin','bob'],rooted=True):
 
@@ -1366,7 +1296,7 @@ def get_all_groups_of_edited_sites(tree_str,ancestor,animals=['oct','bim','sep',
 def get_groups_of_edited_and_unedited_sites(tree_str,ancestor,intermediate,leaf,rooted=True):
 
     
-    leaves_to_ancestors_dict, ancestors_to_leaves_dict, ancestors_to_downstream_ancestors_dict, ancestors_to_upstream_ancestors_dict = create_tree_relations_dicts(tree_str) 
+    tree, leaves_to_ancestors_dict, ancestors_to_leaves_dict, ancestors_to_downstream_ancestors_dict, ancestors_to_upstream_ancestors_dict = create_tree_relations_dicts(tree_str) 
     
     groups_for_product=[]
     other_intermediate_leaves=[l for l in ancestors_to_leaves_dict[intermediate] if l!=leaf and all([k not in set.intersection(set(ancestors_to_downstream_ancestors_dict[intermediate]),set(leaves_to_ancestors_dict[leaf])) for k in leaves_to_ancestors_dict[l]])]
@@ -1392,7 +1322,7 @@ def get_groups_of_edited_and_unedited_sites(tree_str,ancestor,intermediate,leaf,
     
     non_edited_leaves = []
     all_ancestors_leaves=ancestors_to_leaves_dict[ancestor]
-    all_root_leaves=ancestors_to_leaves_dict[x.root.name]
+    all_root_leaves=ancestors_to_leaves_dict[tree.root.name]
     for l in all_root_leaves:
         if l not in all_ancestors_leaves:
             non_edited_leaves.append(l)
@@ -1410,7 +1340,7 @@ def determine_editing_for_ancestor(row,edited_leaves,ancestor):
     else:
         return 0
     
-def reconstruct_trinity_location(row, animals, trinity_dict):
+def reconstruct_trinity_location(row, animals, trinity_dict, complementary_loc_for_antisense=True):
 
     for a in animals:
         row[a+'_trinity_component']=row[a+'_id'].split('|')[1]
@@ -1425,8 +1355,12 @@ def reconstruct_trinity_location(row, animals, trinity_dict):
             if strand=="+":
                 row[a+'_trinity_locatin_base1']=int(row[a+'_coding_location'])+int(trinity_row['orfs_start'])
             elif strand=="-":
-                row[a+'_trinity_locatin_base1']=int(trinity_row['orfs_end'])-int(row[a+'_coding_location'])-1    
-            
+                anti_sense_location_base_1 = int(trinity_row['orfs_end'])-int(row[a+'_coding_location'])-1  
+                if complementary_loc_for_antisense:
+                    row[a+'_trinity_locatin_base1']=len(trinity_row['sequence'])-anti_sense_location_base_1
+                else:
+                    row[a+'_trinity_locatin_base1']=anti_sense_location_base_1
+                
         else:
             row[a+'_trinity_locatin_base1']='-'
 
@@ -1435,7 +1369,8 @@ def reconstruct_trinity_location(row, animals, trinity_dict):
 def reorganize_sites_data(path,animals,ancestors,tree_strs,trinity_dict):
 
     df = pd.read_csv(path,sep='\t',index_col=False)
-    df = df[~np.logical_and(df['nau_edited']==1, df['edited_animals']==1)]
+    if 'nau' in animals:
+        df = df[~np.logical_and(df['nau_edited']==1, df['edited_animals']==1)]
     df = df.apply(lambda row: reconstruct_trinity_location(row,animals,trinity_dict),axis=1)
     for a in animals:
         df[a+'_aa_swap'] = df.apply(lambda row: row[a+'_original_aa']+row[a+'_AG_target_aa'] if row[a+'_editing_level']>0 else row[a+'_original_aa']+'-', axis=1)
@@ -1662,7 +1597,6 @@ def plot_odds_ratios_for_sites_groups(outfile,hpm_rates_dict, animals=['oct','bi
     plt.close()
         
 
-path = 'C:/Users/shosh/OneDrive/Desktop/RNA_Editing_large_files_Backup_20200906/Phylogeny/results/Sanchez/coleoids/mutations_tests/'
 def mutations_rates_tests(path):
     dfs_list = []
     for f in glob.glob(path+'mutations_count*'):
@@ -1671,6 +1605,23 @@ def mutations_rates_tests(path):
     df_all = pd.concat(dfs_list,sort=False)
     df_all['p_val'] = df_all.apply(lambda row: stats.fisher_exact([[row['edited'],row['edited_mutations']],[row['unedited'],row['unedited_mutations']]])[1],axis=1)
     df_all.to_excel(path+'mutations_tests_results.xlsx',index=False)
+   
+    
+
+
+
+
+def dnds_odds_ratio_analysis(df1,df2, name1='neural',name2='non_neural'):
+    
+    
+    df1['dnds'] = df1.apply(lambda row: float(row['nonsyn_mutated'])*row['syn_nucl']/(row['nonsyn_nucl']*float(row['syn_mutated'])), axis=1)
+    df2['dnds'] = df2.apply(lambda row: float(row['nonsyn_mutated'])*row['syn_nucl']/(row['nonsyn_nucl']*float(row['syn_mutated'])), axis=1)
+   
+    merged_df = df1.merge(df2,suffixes=('_'+name1,'_'+name2),left_index=True,right_index=True)
+    
+    merged_df['Z'] = merged_df.apply(lambda row: calculates_odds_ratios_z_score(row['nonsyn_mutated_neural'],row['nonsyn_nucl_neural'],row['syn_mutated_neural'],row['syn_nucl_neural'],row['nonsyn_mutated_non_neural'],row['nonsyn_nucl_non_neural'],row['syn_mutated_non_neural'],row['syn_nucl_non_neural'])[0], axis=1)
+    merged_df['pval'] = merged_df.apply(lambda row: calculates_odds_ratios_z_score(row['nonsyn_mutated_neural'],row['nonsyn_nucl_neural'],row['syn_mutated_neural'],row['syn_nucl_neural'],row['nonsyn_mutated_non_neural'],row['nonsyn_nucl_non_neural'],row['syn_mutated_non_neural'],row['syn_nucl_non_neural'])[1], axis=1)
+    
     
 
 if __name__=='__main__':
@@ -1723,6 +1674,13 @@ if __name__=='__main__':
            'no_boblin_unrooted':"(apl,nau,((oct,bim)O,(sep,squ)S)C)N0"}
     
     
+    neural_path = 'C:/Users/shosh/OneDrive/Desktop/RNA_Editing_large_files_Backup_20200906/Phylogeny/results/Sanchez/dnds_analysis/dnds_neural'
+    non_neural_path = 'C:/Users/shosh/OneDrive/Desktop/RNA_Editing_large_files_Backup_20200906/Phylogeny/results/Sanchez/dnds_analysis/dnds_non_neural'
+
+    df1 = pd.read_csv(neural_path,sep='\t',index_col=0)
+    df2 = pd.read_csv(non_neural_path,sep='\t',index_col=0)
+    
+    
 # =============================================================================
 #     s = "O.vult19956t681198t36527t1651609\nO.bimt12868t687196t23751t1664678\nS.ofit21942t650796t41986t1594042\nD.peat13816t684107t25836t1637114\nEupt8716t668266t16140t1651819\nS.lint16327t675324t29367t1621529\n"
 #     rows = s.split('\n')
@@ -1756,28 +1714,28 @@ if __name__=='__main__':
     
         
 # =============================================================================
-#     trinity_files_path='E:/RNA_editing_Large_files/transcriptomes_fix/trinity_transcriptomes/our_fix/new_transcriptomes/'
+#     trinity_files_path='C:/Users/shosh/OneDrive/Desktop/RNA_Editing_large_files_Backup_20200906/transcriptomes_fix/trinity_transcriptomes/our_fix/new_native_transcriptomes/'
 #     animals=['apl','nau','oct', 'bim', 'sep', 'squ', 'lin', 'bob']
 #     print('Reading all transcripts from fasta files')
 #     trinity_dict = {}
 #     for a in animals:
-#         trinity_df = read_trinity_mrna_files(trinity_files_path+'new_orfs_'+a+'.fa')
+#         trinity_df = read_trinity_mrna_files(trinity_files_path+'new_native_orfs_'+a+'.fa')
 #         trinity_df.set_index('id', inplace=True)
 #         trinity_dict.update({a:trinity_df})
 #     
-# #    path = 'E:/RNA_editing_Large_files/Phylogeny/results/coleoids/our_model/rooted/edited_rows'
-# #    tree_str = trees['coleoids_rooted']
-# #    print("Processing table for \n"+tree_str)
-# #    animals=['oct', 'bim', 'sep', 'squ', 'lin', 'bob']
-# #    ancestors=['C','O','D','B','S']
-# #    reorganize_sites_data(path,animals,ancestors,tree_str,trinity_dict)
-# #    
-#     path = 'E:/RNA_editing_Large_files/Phylogeny/results/all8/edited_rows_all8'
+#     path = 'C:/Users/shosh/OneDrive/Desktop/RNA_Editing_large_files_Backup_20200906/Phylogeny/results/Sanchez/coleoids/edited_rows_coleoids'
+#     tree_str = trees['coleoids_rooted']
+#     print("Processing table for \n"+tree_str)
+#     animals=['oct', 'bim', 'sep', 'squ', 'lin', 'bob']
+#     ancestors=['C','O','D','B','S']
+#     df_coleoids=reorganize_sites_data(path,animals,ancestors,tree_str,trinity_dict)
+#     
+#     path = 'C:/Users/shosh/OneDrive/Desktop/RNA_Editing_large_files_Backup_20200906/Phylogeny/results/Sanchez/all8/edited_rows_all8'
 #     tree_str = trees['all8_rooted']
 #     print("Processing table for \n"+tree_str)
 #     animals=['apl','nau','oct', 'bim', 'sep', 'squ', 'lin', 'bob']
 #     ancestors=['N0','N1','C','O','D','B','S']
-#     df=reorganize_sites_data(path,animals,ancestors,tree_str,trinity_dict)
+#     df_all8=reorganize_sites_data(path,animals,ancestors,tree_str,trinity_dict)
 # =============================================================================
     
 # =============================================================================
@@ -1918,39 +1876,41 @@ if __name__=='__main__':
 # =============================================================================
     
     
-    # hpm_rates_dict = {}
-    # animals=['oct','bim','sep','squ','bob','lin']
-    # conserved_groups = ['bim_oct','sep_squ','bob_lin','bob_lin_sep_squ','bim_bob_lin_oct_sep_squ']
-    # animals=['oct','bim','sep','squ','bob','lin']
-    # conserved_groups = ['bim_oct','lin_sep','bob_lin_sep','bob_lin_sep_squ','bim_bob_lin_oct_sep_squ'
-    # animals=['oct','bim','sep','squ']
-    # conserved_groups = ['bim_oct','sep_squ','bim_oct_sep_squ']
-    # path = 'E:/RNA_editing_Large_files/Phylogeny/results/all8/hpm/'
-    # path = 'E:/RNA_editing_Large_files/Phylogeny/results/all8/hpm_cephalopods_ancestry/'
-    # path = 'C:/Users/shosh/OneDrive/Desktop/all8_ncbi/'
-    # path = 'C:/Users/shosh/OneDrive/Desktop/RNA_Editing_large_files_Backup_20200906/Phylogeny/results/Sanchez/all8/hpm_cephalopods_ancestry/'
-    # path = 'C:/Users/shosh/OneDrive/Desktop/RNA_Editing_large_files_Backup_20200906/Phylogeny/results/Sanchez/neural/all8_hpm/'
-
-    animals=['oct','bim','sep','squ','bob','lin']
-    conserved_groups = ['bim_oct','sep_squ','bob_lin','bob_lin_sep_squ','bim_bob_lin_oct_sep_squ']
-    path = 'C:/Users/shosh/OneDrive/Desktop/RNA_Editing_large_files_Backup_20200906/Phylogeny/results/Sanchez/all8/hpm_cephalopods_ancestry/'    
-    rates_df, el_df = collect_results_for_hpm_and_plot_probs(path,animals,conserved_groups)      
-    
-    animals=['oct','bim','sep','squ','bob','lin']
-    conserved_groups = ['bim_oct','lin_sep','bob_lin_sep','bob_lin_sep_squ','bim_bob_lin_oct_sep_squ']
-    path = 'C:/Users/shosh/OneDrive/Desktop/RNA_Editing_large_files_Backup_20200906/Phylogeny/results/NCBI/all8/hpm_cephalopods_ancestry_aa/'    
-    rates_df, el_df = collect_results_for_hpm_and_plot_probs(path,animals,conserved_groups)      
-    
-    # hpm_rates_dict = {}
-    # animals=['oct','bim','sep','squ','bob','lin']
-    # conserved_groups = ['bim_oct','sep_squ','bob_lin','bob_lin_sep_squ','bim_bob_lin_oct_sep_squ']
-    # path = 'C:/Users/shosh/OneDrive/Desktop/RNA_Editing_large_files_Backup_20200906/Phylogeny/results/Sanchez/non_neural/4fold/all8_hpm/'
-    # rates_df, el_df = collect_results_for_hpm_and_plot_probs(path,animals,conserved_groups)      
-    # hpm_rates_dict.update({'non_neural':rates_df})
-    
-    # path = 'C:/Users/shosh/OneDrive/Desktop/RNA_Editing_large_files_Backup_20200906/Phylogeny/results/Sanchez/neural/4fold/all8_hpm/'
-    # rates_df, el_df = collect_results_for_hpm_and_plot_probs(path,animals,conserved_groups)      
-    # hpm_rates_dict.update({'neural':rates_df})
+# =============================================================================
+#     # hpm_rates_dict = {}
+#     # animals=['oct','bim','sep','squ','bob','lin']
+#     # conserved_groups = ['bim_oct','sep_squ','bob_lin','bob_lin_sep_squ','bim_bob_lin_oct_sep_squ']
+#     # animals=['oct','bim','sep','squ','bob','lin']
+#     # conserved_groups = ['bim_oct','lin_sep','bob_lin_sep','bob_lin_sep_squ','bim_bob_lin_oct_sep_squ'
+#     # animals=['oct','bim','sep','squ']
+#     # conserved_groups = ['bim_oct','sep_squ','bim_oct_sep_squ']
+#     # path = 'E:/RNA_editing_Large_files/Phylogeny/results/all8/hpm/'
+#     # path = 'E:/RNA_editing_Large_files/Phylogeny/results/all8/hpm_cephalopods_ancestry/'
+#     # path = 'C:/Users/shosh/OneDrive/Desktop/all8_ncbi/'
+#     # path = 'C:/Users/shosh/OneDrive/Desktop/RNA_Editing_large_files_Backup_20200906/Phylogeny/results/Sanchez/all8/hpm_cephalopods_ancestry/'
+#     # path = 'C:/Users/shosh/OneDrive/Desktop/RNA_Editing_large_files_Backup_20200906/Phylogeny/results/Sanchez/neural/all8_hpm/'
+# 
+#     animals=['oct','bim','sep','squ','bob','lin']
+#     conserved_groups = ['bim_oct','sep_squ','bob_lin','bob_lin_sep_squ','bim_bob_lin_oct_sep_squ']
+#     path = 'C:/Users/shosh/OneDrive/Desktop/RNA_Editing_large_files_Backup_20200906/Phylogeny/results/Sanchez/all8/hpm_cephalopods_ancestry/'    
+#     rates_df, el_df = collect_results_for_hpm_and_plot_probs(path,animals,conserved_groups)      
+#     
+#     animals=['oct','bim','sep','squ','bob','lin']
+#     conserved_groups = ['bim_oct','lin_sep','bob_lin_sep','bob_lin_sep_squ','bim_bob_lin_oct_sep_squ']
+#     path = 'C:/Users/shosh/OneDrive/Desktop/RNA_Editing_large_files_Backup_20200906/Phylogeny/results/NCBI/all8/hpm_cephalopods_ancestry_aa/'    
+#     rates_df, el_df = collect_results_for_hpm_and_plot_probs(path,animals,conserved_groups)      
+#     
+#     # hpm_rates_dict = {}
+#     # animals=['oct','bim','sep','squ','bob','lin']
+#     # conserved_groups = ['bim_oct','sep_squ','bob_lin','bob_lin_sep_squ','bim_bob_lin_oct_sep_squ']
+#     # path = 'C:/Users/shosh/OneDrive/Desktop/RNA_Editing_large_files_Backup_20200906/Phylogeny/results/Sanchez/non_neural/4fold/all8_hpm/'
+#     # rates_df, el_df = collect_results_for_hpm_and_plot_probs(path,animals,conserved_groups)      
+#     # hpm_rates_dict.update({'non_neural':rates_df})
+#     
+#     # path = 'C:/Users/shosh/OneDrive/Desktop/RNA_Editing_large_files_Backup_20200906/Phylogeny/results/Sanchez/neural/4fold/all8_hpm/'
+#     # rates_df, el_df = collect_results_for_hpm_and_plot_probs(path,animals,conserved_groups)      
+#     # hpm_rates_dict.update({'neural':rates_df})
+# =============================================================================
 
     
 # =============================================================================
