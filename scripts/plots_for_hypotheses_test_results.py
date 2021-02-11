@@ -15,28 +15,223 @@ import itertools as it
 from scipy import stats
 from Bio import Phylo, SeqIO
 from Bio.Seq import Seq
-from Bio.Alphabet import generic_dna 
+
 from math import floor, log10, sqrt, log
 from decimal import Decimal
 import gzip
+import re
 
 try:
     import seaborn as sns
     import matplotlib.pyplot as plt
+    from matplotlib import lines 
     import matplotlib.transforms as transforms
     import pylab
 except ImportError:
     print('Could not Import data-viz libraries')
 
+from hypotheses_test import *
+
 try:
     from StringIO import StringIO ## for Python 2
 except ImportError:
     from io import StringIO ## for Python 3
- 
+
+
+#this dictionaty defines the labeles of each species in plots and results tables
+animals_names_dict={'sep':'S.ofi',
+                    'squ':'D.pea',
+                    'bim':'O.bim',
+                    'oct':'O.vul',
+                    'bob':'Eup',
+                    'lin':'S.lin',
+                    'apl':'Apl',
+                    'nau':'Nau',
+                    'bim_oct':'O.vul-O.bim',
+                    'sep_squ':'D.pea-S.ofi',
+                    'lin_sep':'S.ofi-S.lin',
+                    'lin_squ':'D.pea-S.lin',
+                    'bob_lin_squ':'D.pea-S.lin-Eup',
+                    'bob_lin':'Eup-S.lin',
+                    'bob_lin_sep':'S.ofi-S.lin-Eup',
+                    'bob_lin_sep_squ':'Decapodiformes',
+                    'bim_bob_lin_oct_sep_squ':'Coleoids',
+                    'N0':'Mollusca',
+                    'N1':'C0',
+                    'C':'C1',
+                    'D':'D',
+                    'B':'B',
+                    'S':'S',
+                    'O':'O',
+                    'S0':'S0',
+                    'S1':'S1'}
+
+
+def read_fasta_to_df(trinity_file):
+    """
+    read relevat information from transcriptome file
+    """
+    data = []
+    col_names = ['id','sequence']
+    for record in SeqIO.parse(open(trinity_file, "r"), "fasta"):
+        data.append((record.id.split('|')[1].rstrip().lstrip(),record.seq))
     
-path = 'E:/RNA_editing_Large_files/Phylogeny/results/Sanchez/all8/hpm_ancestral_nucl/'
-def collect_results_for_anacestral_state_hpm_and_plot_probs(path,animals,conserved_groups):
+    df = pd.DataFrame(data = data, columns = col_names)
+    return df
+
+
+def find_codon(row, a, trinity_df):
+    coding_loc=int(row[a+'_coding_location'])
+    loc_in_codon=coding_loc%3
+    sequence=trinity_df.loc[row[a+'_id'].split('|')[1],'sequence']
+    codon=sequence[coding_loc-loc_in_codon:coding_loc+3-loc_in_codon]
+    if list(codon).count('A')>1:
+        codon=codon+';'+str(loc_in_codon)
+    return str(codon)
         
+
+def codons_dist_dict(sites_df,trinity_dict,conserved_animals,aa_instead=False):
+    
+    sites_df['take_site']=sites_df.apply(lambda row: all([int(row[a+'_edited']) for a in conserved_animals]), axis=1)
+    relevant_sites = sites_df[sites_df['take_site']].copy()
+    if aa_instead:
+        relevant_sites['consensus_swap']=relevant_sites.apply(lambda row: max(set([row[a+'_original_aa']+row[a+'_AG_target_aa'] for a in conserved_animals]),
+                                                                              key=[row[a+'_original_aa']+row[a+'_AG_target_aa'] for a in conserved_animals].count), axis=1)
+    else:
+        for a in conserved_animals:
+            relevant_sites[a+'_codon']=relevant_sites.apply(lambda row: find_codon(row,a,trinity_dict[a]),axis=1)
+        relevant_sites['consensus_swap']=relevant_sites.apply(lambda row: max(set([row[a+'_codon'] for a in conserved_animals]),
+                                                                              key=[row[a+'_codon'] for a in conserved_animals].count), axis=1)
+        
+    swaps_dict={}
+    for swap in sorted(set(relevant_sites['consensus_swap'].values)):
+        swaps_dict.update({swap:len(relevant_sites[relevant_sites['consensus_swap']==swap])})    
+    return swaps_dict
+    
+
+def mismatches_dist(outpath,codons_dist_dict,animals):
+    
+    def edit_codon(codon,loc):
+        codon_lst=list(codon)
+        codon_lst[int(loc)]='G'
+        return ''.join(codon_lst)            
+    
+    codons_lst=[]
+    for p in it.permutations((('A'),('C','T','G'),('A'),('C','T','G'),('A')),3):
+        for c in it.product(*p):
+            codon=''.join(c)
+            for loc in [m.start() for m in re.finditer('A', codon)]:
+                codons_lst.append(codon+';'+str(loc))
+    codons_lst=set(codons_lst)
+    
+    data=[]
+    if type(animals) is str:
+        values_col = animals+'_events'
+    else:
+        values_col = '_'.join(animals)+'_events'
+    columns = ('original_aa','target_aa','codon','nucl',values_col)
+    for codon in codons_lst:
+        codon_str=codon.split(';')[0]
+        loc=int(codon.split(';')[1])
+        try:
+            events=codons_dist_dict[codon]
+        except KeyError:
+            events=0
+        if len(codon_str)!=3:
+            print(str(animals)+' '+codon+' is not a multiplete of 3')
+
+        data.append((str(Seq(codon).translate()),
+                     str(Seq(edit_codon(codon_str,loc)).translate()),
+                     codon_str, loc, events))
+        
+    df = pd.DataFrame(data=data,columns=columns)
+    sorted_df=df.sort_values(['original_aa','codon','nucl'],ascending=[True,True,True])
+    return sorted_df
+
+def plot_mm_dist(df,outpath,title):
+
+        width=0.2
+        sorted_df=df.sort_values(['original_aa','codon','nucl'],ascending=[True,True,True])
+        sorted_df['editing_in_codon']=sorted_df.apply(lambda row: row['codon']+';'+str(row['nucl']+1)+'>'+row['target_aa'], axis=1)
+        fig, ax = plt.subplots(figsize=(20, 10))
+        swaps=list(sorted_df['editing_in_codon'].values)
+        events = list(sorted_df[title+'_events'].values)
+        values = [x/sum(events) for x in events]
+        plt.bar(swaps,values,width=width)
+        plt.xticks(np.arange(len(swaps)),swaps,rotation=90)   
+        plt.ylabel('Mismatch fraction')
+        aas=sorted(list(set(list(sorted_df['original_aa'].values))))
+        ticks=ax.get_xticks()
+
+        j=0
+        k=0
+        ticks_vals = list(enumerate(ticks))
+        trans = ax.get_xaxis_transform()
+        for i,t in ticks_vals:
+            if i==j:
+                aa=aas[k]
+                ticks_n=len(sorted_df[sorted_df['original_aa']==aa])
+                last_tick_for_aa=ticks_vals[i+ticks_n-1]
+                plt.text((t+float(ticks_n-1)/2-0.15),-0.15,aa,size=10,transform=trans)    
+                plt.plot([t-0.30,last_tick_for_aa[1]+0.25],[-0.13,-0.13],color = 'black',transform=trans,clip_on=False)        
+                j+=ticks_n
+                k+=1
+            else:
+                pass
+
+        plt.savefig(outpath+title+'_codons_dist.jpg')
+        plt.close()
+        
+        
+def plot_mm_dist_for_multiple_animals(df,outpath,title,animals):
+
+        sorted_df=df.sort_values(['original_aa','codon','nucl'],ascending=[True,True,True])
+        sorted_df['editing_in_codon']=sorted_df.apply(lambda row: row['codon']+';'+str(row['nucl']+1)+'>'+row['target_aa'], axis=1)
+        fig, ax = plt.subplots(figsize=(20, 10))
+        
+        
+        colors = ['red','blue','yellow','grey','green','pink']
+        
+        bar_width=0.5
+        swaps=list(sorted_df['editing_in_codon'].values)
+        ticks_steps=4
+        locs = np.arange(start=0,stop=len(swaps)*ticks_steps,step=ticks_steps)   
+        for i,a in enumerate(animals):
+            bars_locs=[x+i*bar_width for x in locs]
+            events = list(sorted_df[a].values)
+            values = [x/sum(events) for x in events]
+            plt.bar(bars_locs,values,width=bar_width,color=colors[i],label=a)
+        
+        plt.xticks([x+bar_width*(len(animals)-1)/2 for x in locs],swaps,rotation=90)   
+        plt.ylabel('Mismatch fraction',fontsize='20')
+        plt.tick_params(axis='y', which='both', labelsize=17)
+        aas=sorted(list(set(list(sorted_df['original_aa'].values))))
+        ticks=ax.get_xticks()
+
+        j=0
+        k=0
+        ticks_vals = list(enumerate(ticks))
+        trans = ax.get_xaxis_transform()
+        for i,t in ticks_vals:
+            if i==j:
+                aa=aas[k]
+                ticks_n=len(sorted_df[sorted_df['original_aa']==aa])
+                last_tick_for_aa=ticks_vals[i+ticks_n-1]
+                plt.text((t+float(ticks_n-1)*ticks_steps/2-0.8),-0.15,aa,size=10,transform=trans)    
+                plt.plot([t-1.2,last_tick_for_aa[1]+0.9],[-0.13,-0.13],color = 'black',transform=trans,clip_on=False)        
+                j+=ticks_n
+                k+=1
+            else:
+                pass
+            
+        plt.legend(loc=(0.85,0.6),prop={'size':20})
+        plt.savefig(outpath+title+'.jpg')
+        plt.close()
+    
+
+
+def collect_results_for_anacestral_state_hpm_and_plot_probs(path,animals,conserved_groups):
+    
     def plot_rates_grouped_bars(path,df,name,title):
                 
         df['Species']=df.apply(lambda row: animals_names_dict[row.name],axis=1)
@@ -50,12 +245,9 @@ def collect_results_for_anacestral_state_hpm_and_plot_probs(path,animals,conserv
         df['nonsyn_res_err'] = df.apply(lambda row: np.sqrt(row['nonsyn_res_rate']*(1-row['nonsyn_res_rate'])/row.nonsyn_res), axis=1)
         df['syn_div_err'] = df.apply(lambda row: np.sqrt(row['syn_div_rate']*(1-row['syn_div_rate'])/row.syn_div), axis=1)
         df['nonsyn_div_err'] = df.apply(lambda row: np.sqrt(row['nonsyn_div_rate']*(1-row['nonsyn_div_rate'])/row.nonsyn_div), axis=1)
-
         df['res_div_all_sites_pval'] = df.apply(lambda row: stats.fisher_exact([[row.nonsyn_res_edited,row.nonsyn_res],[row.nonsyn_div_edited,row['nonsyn_div']]])[1], axis=1)        
         df['res_all_sites_pval'] = df.apply(lambda row: stats.fisher_exact([[row.nonsyn_res_edited,row.nonsyn_res],[row.syn_res_edited,row['syn_res']]])[1], axis=1)        
-        df['div_all_sites_pval'] = df.apply(lambda row: stats.fisher_exact([[row.nonsyn_div_edited,row['nonsyn_div']],[row.syn_div_edited,row['syn_div']]])[1], axis=1)        
-
-        
+        df['div_all_sites_pval'] = df.apply(lambda row: stats.fisher_exact([[row.nonsyn_div_edited,row['nonsyn_div']],[row.syn_div_edited,row['syn_div']]])[1], axis=1)         
         max_y = max(list(df['synonymous'])+list(df['restorative'])+list(df['diversifying']))        
         pdax = pd.concat([df.synonymous.rename('synonymous'), df.restorative.rename('restorative'), df.diversifying.rename('diversifying')], axis=1).plot(kind='bar', yerr=(df['syn_err'].values,df['res_err'].values,df['div_err'].values), error_kw=dict(lw=1, capsize=2, capthick=1), color=['grey','deepskyblue','red'])
         ticks = pdax.get_xticks()
@@ -68,12 +260,11 @@ def collect_results_for_anacestral_state_hpm_and_plot_probs(path,animals,conserv
         plt.tick_params(axis='y', which='both', labelsize=15)
         plt.ylim([0,max_y*1.2])
         plt.gcf().set_size_inches(8,7)
-
         pdax.legend(ncol=3,fontsize=13,bbox_to_anchor=(0.95, 1.1))
         for i,t in enumerate(ticks):
-            plt.plot([t-0.07,t+0.3],[max_y*1.08,max_y*1.08],color = 'black')
-            plt.plot([t-0.07,t-0.07],[max_y*1.08,max_y*1.06],color = 'black')
-            plt.plot([t+0.3,t+0.3],[max_y*1.08,max_y*1.06],color = 'black')
+            plt.plot([t,t+0.2],[max_y*1.08,max_y*1.08],color = 'black')
+            plt.plot([t,t],[max_y*1.08,max_y*1.07],color = 'black')
+            plt.plot([t+0.2,t+0.2],[max_y*1.08,max_y*1.07],color = 'black')
             ps=pval_str(df.loc[labels[i].get_text(),'all_sites_pval'])
             if ps=='ns':
                 align=0.03
@@ -82,8 +273,7 @@ def collect_results_for_anacestral_state_hpm_and_plot_probs(path,animals,conserv
             plt.text(t+align,max_y*1.1,pval_str(df.loc[labels[i].get_text(),'all_sites_pval']),size=10)
         plt.savefig(path+name+'_types_rates.png')
         plt.close()
-        
-        
+    
         df['syn_res_species_specific_rate'] = df.apply(lambda row: float(row.syn_res_species_specific_edited)/row.syn_res, axis=1)
         df['nonsyn_res_species_specific_rate'] = df.apply(lambda row: float(row.nonsyn_res_species_specific_edited)/row.nonsyn_res, axis=1)
         df['syn_div_species_specific_rate'] = df.apply(lambda row: float(row.syn_div_species_specific_edited)/row.syn_div, axis=1)
@@ -92,11 +282,9 @@ def collect_results_for_anacestral_state_hpm_and_plot_probs(path,animals,conserv
         df['nonsyn_res_species_specific_err'] = df.apply(lambda row: np.sqrt(row['nonsyn_res_species_specific_rate']*(1-row['nonsyn_res_species_specific_rate'])/row.nonsyn_res), axis=1)
         df['syn_div_species_specific_err'] = df.apply(lambda row: np.sqrt(row['syn_div_species_specific_rate']*(1-row['syn_div_species_specific_rate'])/row.syn_div), axis=1)
         df['nonsyn_div_species_specific_err'] = df.apply(lambda row: np.sqrt(row['nonsyn_div_species_specific_rate']*(1-row['nonsyn_div_species_specific_rate'])/row.nonsyn_div), axis=1)
-
         df['res_div_species_specific_all_sites_pval'] = df.apply(lambda row: stats.fisher_exact([[row.nonsyn_res_edited,row.nonsyn_res],[row.nonsyn_div_edited,row['nonsyn_div']]])[1], axis=1)        
         df['res_species_specific_all_sites_pval'] = df.apply(lambda row: stats.fisher_exact([[row.nonsyn_res_edited,row.nonsyn_res],[row.syn_res_edited,row['syn_res']]])[1], axis=1)        
         df['div_species_specific_all_sites_pval'] = df.apply(lambda row: stats.fisher_exact([[row.nonsyn_div_edited,row['nonsyn_div']],[row.syn_div_edited,row['syn_div']]])[1], axis=1)        
-
         max_y = max(list(df['synonymous'])+list(df['restorative'])+list(df['diversifying']))
         pdax = pd.concat([df.synonymous_species_specific.rename('synonymous'), df.restorative_species_specific.rename('restorative'), df.diversifying_species_specific.rename('diversifying')], axis=1).plot(kind='bar',yerr=(df['syn_ss_err'].values,df['res_ss_err'].values,df['div_ss_err'].values), error_kw=dict(lw=1, capsize=2, capthick=1),color=['grey','deepskyblue','red'])           
         ticks = pdax.get_xticks()
@@ -111,9 +299,9 @@ def collect_results_for_anacestral_state_hpm_and_plot_probs(path,animals,conserv
         plt.gcf().set_size_inches(8,7)
         pdax.legend(ncol=3,fontsize=13,bbox_to_anchor=(0.95, 1.1))
         for i,t in enumerate(ticks):
-            plt.plot([t-0.07,t+0.3],[max_y*1.08,max_y*1.08],color = 'black')
-            plt.plot([t-0.07,t-0.07],[max_y*1.08,max_y*1.06],color = 'black')
-            plt.plot([t+0.3,t+0.3],[max_y*1.08,max_y*1.06],color = 'black')
+            plt.plot([t,t+0.2],[max_y*1.08,max_y*1.08],color = 'black')
+            plt.plot([t,t],[max_y*1.08,max_y*1.07],color = 'black')
+            plt.plot([t+0.2,t+0.2],[max_y*1.08,max_y*1.07],color = 'black')
             ps=pval_str(df.loc[labels[i].get_text(),'all_sites_pval'])
             if ps=='ns':
                 align=0
@@ -122,7 +310,6 @@ def collect_results_for_anacestral_state_hpm_and_plot_probs(path,animals,conserv
             plt.text(t+align,max_y*1.1,pval_str(df.loc[labels[i].get_text(),'all_sites_pval']),size=10)
         plt.savefig(path+'species_specific_'+name+'_types_rates.png')
         plt.close()
-        
         return df
         
     def plot_editing_levels_distributions_by_types(path,el_by_types_dict,animals,name,ylim):
@@ -157,7 +344,6 @@ def collect_results_for_anacestral_state_hpm_and_plot_probs(path,animals,conserv
             
             align=-0.4
             axes[i].text(2.35+align,ylim-0.045,pval_s,size=15)
-
 
         fig.savefig(path+name+'_sites_editing_level_dist_by_types.png')
         plt.close()
@@ -200,11 +386,20 @@ def collect_results_for_anacestral_state_hpm_and_plot_probs(path,animals,conserv
     cnt = pd.read_csv(path+'editing_types_count',sep='\t',index_col=0)
     cnt.to_excel(path+'editing_types_count.xlsx')
 
-#    #editing types rates
-#    rates = pd.read_csv(path+'editing_types_rates',sep='\t',index_col=0)
-#    rates.to_excel(path+'editing_types_rates.xlsx')
-#    plot_rates_grouped_bars(path,rates.loc[animals,:],'all_sites')
-#    plot_rates_grouped_bars(path,rates.loc[conserved_groups,:],'conserved_sites')
+    #editing types rates
+    # rates = pd.read_csv(path+'editing_types_rates',sep='\t',index_col=0)
+    # rates.to_excel(path+'editing_types_rates.xlsx')
+    # plot_rates_grouped_bars(path,rates.loc[animals,:],'all_sites')
+    # plot_rates_grouped_bars(path,rates.loc[conserved_groups,:],'conserved_sites')
+    
+        # editing levels by types
+    # el_by_types_dict={}
+    # for f in glob.glob(path+'editing_levels_by_types_*'):
+        # name=f.split('\\')[-1].replace('editing_levels_by_types_','')
+        # s = pd.read_csv(f, sep='\t', index_col=0, squeeze=True)
+        # el_by_types_dict.update({name:s})
+    # plot_editing_levels_distributions_by_types(path,el_by_types_dict,animals,'all',0.4)
+    # plot_editing_levels_distributions_by_types(path,el_by_types_dict,conserved_groups,'conserved',1)
     
     #editing types rates
     rates = pd.read_csv(path+'ancestral_editing_types_rates_strong',sep='\t',index_col=0)
@@ -212,25 +407,14 @@ def collect_results_for_anacestral_state_hpm_and_plot_probs(path,animals,conserv
     rates_claced.to_excel(path+'ancestral_editing_types_rates_strong.xlsx')
     rates_claced = plot_rates_grouped_bars(path,rates.loc[conserved_groups,:],'conserved_sites_strong','Strong sites')
     rates_claced.to_excel(path+'ancestral_conserved_editing_types_rates_strong.xlsx')
-#    df.to_excel(path+'ancestral_conserved_editing_types_rates_strong.xlsx')
+    # df.to_excel(path+'ancestral_conserved_editing_types_rates_strong.xlsx')
     
-    
-        #editing types rates
+    #editing types rates
     rates = pd.read_csv(path+'editing_types_rates_weak',sep='\t',index_col=0)
     rates_claced = plot_rates_grouped_bars(path,rates.loc[animals,:],'all_sites_weak','Weak sites')
     rates_claced.to_excel(path+'editing_types_rates_weak.xlsx')
     rates_claced = plot_rates_grouped_bars(path,rates.loc[conserved_groups,:],'conserved_sites_weak','Weak sites')
     rates_claced.to_excel(path+'conserved_editing_types_rates_weak.xlsx')
-
-
-    #editing levels by types
-#    el_by_types_dict={}
-#    for f in glob.glob(path+'editing_levels_by_types_*'):
-#        name=f.split('\\')[-1].replace('editing_levels_by_types_','')
-#        s = pd.read_csv(f, sep='\t', index_col=0, squeeze=True)
-#        el_by_types_dict.update({name:s})
-#    plot_editing_levels_distributions_by_types(path,el_by_types_dict,animals,'all',0.4)
-#    plot_editing_levels_distributions_by_types(path,el_by_types_dict,conserved_groups,'conserved',1)    
 
 
 def read_editing_sites_tbl(editing_sites_file, mm_type = 'AG'):
@@ -265,16 +449,14 @@ def read_trinity_mrna_files(trinity_file):
     
     return df
 
-out_path='E:/RNA_editing_Large_files/Phylogeny/ncbi_tree/'
-tree_str="(apl,(nau,((oct,bim)O,(squ,(bob,(sep,lin)S1)S0)D)C)N1)N0"
-#tree_str = "(apl:1.66844595,(nau:1.59447247,((oct:0.04641534,bim:0.11306375)O:1.1730987,((sep:0.26870934,squ:0.29423436)S:0.06991233,(bob:0.4462184,lin:0.35053024)B:0.08081351)D:0.81645409)C:1.04138211)N1:1.69241697)N0"
+
 def draw_tree(tree_str,out_path):
     handle = StringIO(tree_str)
     tree = Phylo.read(handle, "newick")
     tree.ladderize()
     fig = plt.figure(figsize=(20, 10), dpi=100)
     axes = fig.add_subplot(1, 1, 1)
-#    Phylo.draw(tree, axes=axes,do_show=False,branch_labels=lambda c: c.branch_length)
+    #Phylo.draw(tree, axes=axes,do_show=False,branch_labels=lambda c: c.branch_length)
     Phylo.draw(tree, axes=axes,do_show=True)
     pylab.savefig(out_path+'tree.png',format='png', bbox_inches='tight')
     
@@ -282,13 +464,16 @@ def draw_tree(tree_str,out_path):
 def pval_str(p,s=2):
 
     if p==0:
-        return '0'
+        return '0 *'
+    elif pd.isnull(p):
+        return ''
     elif p<0.05:
         # print(p)
         p=round(float(p),s-int(floor(log10(abs(float(p)))))-1)
-        return '%.1e' % Decimal(p)
+        return '%.1e' % Decimal(p) + ' *'
     else:
-        return 'ns'
+        return '%.1e' % Decimal(p)
+
 
 def round_siginficant(n,s=2):
     r=round(float(n),s-int(floor(log10(abs(float(n)))))-1)
@@ -302,6 +487,7 @@ def round_siginficant(n,s=2):
         new_r_str=new_r_str+'0'    
     
     return new_r_str
+
 
 def pval_stars(p):
     if p>0.05:
@@ -317,13 +503,12 @@ def pval_stars(p):
     return pvals_str
 
     
-def collect_results_for_hpm_and_plot_probs(path,animals,conserved_groups):
+def collect_results_for_hpm_and_plot_probs(path,animals,conserved_groups=None):
         
     def plot_rates_grouped_bars(path,df,name,title):
                 
         df['Species']=df.apply(lambda row: animals_names_dict[row.name],axis=1)
         df.set_index('Species',inplace=True)
-                
         df['synonymous'] = df.apply(lambda row: float(row.syn_edited)/row.syn, axis=1)
         df['restorative'] = df.apply(lambda row: float(row.res_edited)/row.res, axis=1)
         df['diversifying'] = df.apply(lambda row: float(row.div_edited)/row['div'], axis=1)
@@ -331,14 +516,10 @@ def collect_results_for_hpm_and_plot_probs(path,animals,conserved_groups):
         df['res_err'] = df.apply(lambda row: np.sqrt(row['restorative']*(1-row['restorative'])/row.res), axis=1)
         df['div_err'] = df.apply(lambda row: np.sqrt(row['diversifying']*(1-row['diversifying'])/row['div']), axis=1)
         df['all_sites_pval'] = df.apply(lambda row: stats.fisher_exact([[row.res_edited,row.res],[row.div_edited,row['div']]])[1], axis=1)        
-
-        
         max_y = max(list(df['synonymous'])+list(df['restorative'])+list(df['diversifying']))        
         pdax = pd.concat([df.synonymous.rename('synonymous'), df.restorative.rename('restorative'), df.diversifying.rename('diversifying')], axis=1).plot(kind='bar', yerr=(df['syn_err'].values,df['res_err'].values,df['div_err'].values), error_kw=dict(lw=1, capsize=2, capthick=1), color=['grey','deepskyblue','red'])
-#        pdax.errorbar(xerr=)
         ticks = pdax.get_xticks()
         labels = pdax.get_xticklabels()
-#        pdax.set_xticklabels([l.get_text()+'\n'+pval_str(df.loc[l.get_text(),'all_sites_pval']) for l in labels])
         plt.xticks(rotation=0)
         plt.title(title+'\n\n', fontsize=17)
         plt.ylabel('Fraction of sites edited', fontsize=17)
@@ -347,22 +528,19 @@ def collect_results_for_hpm_and_plot_probs(path,animals,conserved_groups):
         plt.tick_params(axis='y', which='both', labelsize=15)
         plt.ylim([0,max_y*1.2])
         plt.gcf().set_size_inches(8,7)
-#        plt.rc('legend',fontsize=13)
         pdax.legend(ncol=3,fontsize=13,bbox_to_anchor=(0.95, 1.1))
         for i,t in enumerate(ticks):
-            plt.plot([t-0.07,t+0.3],[max_y*1.08,max_y*1.08],color = 'black')
-            plt.plot([t-0.07,t-0.07],[max_y*1.08,max_y*1.06],color = 'black')
-            plt.plot([t+0.3,t+0.3],[max_y*1.08,max_y*1.06],color = 'black')
+            plt.plot([t,t+0.2],[max_y*1.08,max_y*1.08],color = 'black')
+            plt.plot([t,t],[max_y*1.08,max_y*1.07],color = 'black')
+            plt.plot([t+0.2,t+0.2],[max_y*1.08,max_y*1.07],color = 'black')
             ps=pval_str(df.loc[labels[i].get_text(),'all_sites_pval'])
             if ps=='ns':
                 align=0.03
             else:
                 align=-0.15
- 
             plt.text(t+align,max_y*1.1,pval_str(df.loc[labels[i].get_text(),'all_sites_pval']),size=10)
         plt.savefig(path+name+'_types_rates.png')
         plt.close()
-        
         
         df['synonymous_species_specific'] = df.apply(lambda row: float(row.specie_specific_syn_edited)/row.syn, axis=1)
         df['restorative_species_specific'] = df.apply(lambda row: float(row.specie_specific_res_edited)/row.res, axis=1)
@@ -385,26 +563,22 @@ def collect_results_for_hpm_and_plot_probs(path,animals,conserved_groups):
         plt.gcf().set_size_inches(8,7)
         pdax.legend(ncol=3,fontsize=13,bbox_to_anchor=(0.95, 1.1))
         for i,t in enumerate(ticks):
-            plt.plot([t-0.07,t+0.3],[max_y*1.08,max_y*1.08],color = 'black')
-            plt.plot([t-0.07,t-0.07],[max_y*1.08,max_y*1.06],color = 'black')
-            plt.plot([t+0.3,t+0.3],[max_y*1.08,max_y*1.06],color = 'black')
+            plt.plot([t,t+0.2],[max_y*1.08,max_y*1.08],color = 'black')
+            plt.plot([t,t],[max_y*1.08,max_y*1.07],color = 'black')
+            plt.plot([t+0.2,t+0.2],[max_y*1.08,max_y*1.07],color = 'black')
             ps=pval_str(df.loc[labels[i].get_text(),'all_sites_pval'])
             if ps=='ns':
                 align=0
             else:
                 align=-0.15
-
             plt.text(t+align,max_y*1.1,pval_str(df.loc[labels[i].get_text(),'all_sites_pval']),size=10)
         plt.savefig(path+'species_specific_'+name+'_types_rates.png')
         plt.close()
-        
         return df
         
     def plot_editing_levels_distributions_by_types(path,el_by_types_dict,animals,name,ylim):
-#        animals = ['sep','squ','bim','oct']
         fig, axes = plt.subplots(nrows=1, ncols=len(animals), figsize=(len(animals)*3, 7))
         for i,a in enumerate(animals):    
-#            plt.plot([2,3],[ylim-0.05,ylim-0.05])
             colors = ['grey','deepskyblue','red']
             data = [el_by_types_dict[a+'_syn'].values,el_by_types_dict[a+'_res'].values,el_by_types_dict[a+'_div'].values]
             pval = stats.mannwhitneyu(el_by_types_dict[a+'_res'].values,el_by_types_dict[a+'_div'].values)[1]
@@ -419,10 +593,10 @@ def collect_results_for_hpm_and_plot_probs(path,animals,conserved_groups):
             pos = np.arange(3) + 1
             upper_labels = [str(np.round(s, 4)) for s in medians]
             for tick, label in zip(range(3), axes[i].get_xticklabels()):
-#                axes[i].text(pos[tick], ylim-0.05, upper_labels[tick] ,horizontalalignment='center', verticalalignment='baseline', color='black') 
-#                axes[i].set_xticklabels([['syn\n','res\n','div\n'][j]+str(round(float(u),3-int(floor(log10(abs(float(u)))))-1)) for j, u in enumerate(upper_labels)])
+                # axes[i].text(pos[tick], ylim-0.05, upper_labels[tick] ,horizontalalignment='center', verticalalignment='baseline', color='black') 
+                # axes[i].set_xticklabels([['syn\n','res\n','div\n'][j]+str(round(float(u),3-int(floor(log10(abs(float(u)))))-1)) for j, u in enumerate(upper_labels)])
                 axes[i].set_xticklabels([['syn\n','res\n','div\n'][j]+str(round_siginficant(float(u))) for j, u in enumerate(upper_labels)])
-#                axes[i].set_xticklabels([['syn\n','res\n','div\n'][j]+str(u) for j, u in enumerate(upper_labels)])
+                # axes[i].set_xticklabels([['syn\n','res\n','div\n'][j]+str(u) for j, u in enumerate(upper_labels)])
                 
                 label.set_rotation(90)
                 axes[i].tick_params(axis='x', which='both', length=0, labelsize=15)
@@ -442,7 +616,7 @@ def collect_results_for_hpm_and_plot_probs(path,animals,conserved_groups):
 
         fig.savefig(path+name+'_sites_editing_level_dist_by_types.png')
         plt.close()
-        
+
         fig, axes = plt.subplots(nrows=1, ncols=len(animals), figsize=(len(animals)*3, 7))
         for i,a in enumerate(animals):    
             colors = ['grey','deepskyblue','red']
@@ -497,8 +671,9 @@ def collect_results_for_hpm_and_plot_probs(path,animals,conserved_groups):
     rates_claced = plot_rates_grouped_bars(path,rates.loc[animals,:],'all_sites_strong','Strong sites')
     rates_claced.to_excel(path+'editing_types_rates_strong.xlsx')
     rates_dict.update({'strong':rates_claced})
-    rates_claced = plot_rates_grouped_bars(path,rates.loc[conserved_groups,:],'conserved_sites_strong','Strong sites')
-    rates_claced.to_excel(path+'conserved_editing_types_rates_strong.xlsx')
+    if conserved_groups is not None:
+        rates_claced = plot_rates_grouped_bars(path,rates.loc[conserved_groups,:],'conserved_sites_strong','Strong sites')
+        rates_claced.to_excel(path+'conserved_editing_types_rates_strong.xlsx')
     
     
         #editing types rates
@@ -506,25 +681,32 @@ def collect_results_for_hpm_and_plot_probs(path,animals,conserved_groups):
     rates_claced = plot_rates_grouped_bars(path,rates.loc[animals,:],'all_sites_weak','Weak sites')
     rates_claced.to_excel(path+'editing_types_rates_weak.xlsx')
     rates_dict.update({'weak':rates_claced})
-    rates_claced = plot_rates_grouped_bars(path,rates.loc[conserved_groups,:],'conserved_sites_weak','Strong sites')
-    rates_claced.to_excel(path+'conserved_editing_types_rates_weak.xlsx')
+    if conserved_groups is not None:
+        rates_claced = plot_rates_grouped_bars(path,rates.loc[conserved_groups,:],'conserved_sites_weak','Strong sites')
+        rates_claced.to_excel(path+'conserved_editing_types_rates_weak.xlsx')
     
 
     #editing levels by types
     el_by_types_dict={}
-    for f in glob.glob(path+'editing_levels_by_types_*'):
+    for f in glob.glob(path+'editing_levels_by_type*'):
         name=f.split('\\')[-1].replace('editing_levels_by_types_','')
-        s = pd.read_csv(f, sep='\t', index_col=0, header=None, squeeze=True)
+        try:
+            s = pd.read_csv(f, sep='\t', index_col=0, header=None, squeeze=True)
+        except pd.errors.EmptyDataError:
+            s = None
         el_by_types_dict.update({name:s})
     plot_editing_levels_distributions_by_types(path,el_by_types_dict,animals,'all',0.4)
-    plot_editing_levels_distributions_by_types(path,el_by_types_dict,conserved_groups,'conserved',1)    
+    if conserved_groups is not None:
+        plot_editing_levels_distributions_by_types(path,el_by_types_dict,conserved_groups,'conserved',1)    
     
     
     return rates_dict, el_by_types_dict
 
-def collect_results_for_general_model_and_plot_probs(path, recalc=True):
+
+def collect_results_for_general_model_and_plot_probs(path, recalc=True, iden_list=[0.3],iden_range_list=[10],editing_level_method_list=['average'],strong_levels=[[0.05,1],[0.1,1],[0.15,1],[0.2,1]], weak_levels=[[0,0.01],[0,0.02],[0,0.05],[0,0.1]],models=['adaptive']):
     
-    def convert_dfs_csv_to_xlsx(*partial_paths_list, file_name = 'analysis'):    
+    def convert_dfs_csv_to_xlsx(*partial_paths_list, file_name='analysis'):
+    # def convert_dfs_csv_to_xlsx(*partial_paths_list, file_name='analysis'):
         models_dict = {}
         files = []
         for p in partial_paths_list:
@@ -535,7 +717,6 @@ def collect_results_for_general_model_and_plot_probs(path, recalc=True):
             models_dict.update({f.split('/')[-1].split('\\')[-1]:df})
         return models_dict
 
-
     def convert_models_dfs_back_to_series(models_dict,new_models_dict=None):        
         if new_models_dict is None:
             new_models_dict = {}
@@ -545,71 +726,24 @@ def collect_results_for_general_model_and_plot_probs(path, recalc=True):
         for k, df in models_dict.items():      
             
             for col in df.columns:
-                s = df[col]
-                file_split = k.split('_')                
+                s = df[col]       
                 index = [''.join([j for j in i if not j.isdigit()]).replace('-','').replace('.','').replace('liberal_','').replace('strict_','') for i in s.index]                
-                if 'strict' in k or 'no_depletion' in k:
-                    name = k+'_'+s['combined_editing_level_method']+'_strong_lower'+str(s['strong_levels_lower_limit'])
-                elif 'liberal' in k:
-                    name = k+'_'+s['combined_editing_level_method']+'_strong_lower'+str(s['strong_levels_lower_limit'])+'_weak_upper'+str(s['weak_levels_upper_limit'])
+                name = k+'_'+s['combined_editing_level_method']+'_strong_lower'+str(s['strong_levels_lower_limit'])+'_weak_upper'+str(s['weak_levels_upper_limit'])+'_adapR'+str(s['adaptive_rate'])
                        
                 new_s = pd.Series(data = s.values, index=index, name=name)
-                if file_split[0]=='liberal':
-                    new_s = new_s.reindex(index = ['ancestor','intermediate','leaf','combined_editing_level_method','strong_levels_lower_limit','strong_levels_upper_limit','weak_levels_lower_limit','weak_levels_upper_limit','intermediate_syn_a','intermediate_non_syn_a','syn_ag_mut_in_leaf','non_syn_ag_mut_in_leaf','syn_ag_mut_rate','non_syn_ag_mut_rate','groups_of_edited_leaves','non_edited_leaves','weak_syn_sites','weak_nonsyn_sites','nonsyn_sites_depletion_factor','strong_syn_sites','strong_non_syn_sites','expected_strong_nonsyn_sites','strong_nonsyn_sites_excess','expected_nonsyn_EG_mutations_from_excess','expected_nonsyn_EG_mutations_from_expected','total_expected_EG_mutations','std','actual_strong_nonsyn_eg_mutations','excess_of_unmutated_sites','p'])
-                elif file_split[0]=='strict':
-                    new_s = new_s.reindex(index = ['ancestor','intermediate','leaf','combined_editing_level_method','strong_levels_lower_limit','strong_levels_upper_limit','intermediate_syn_a','intermediate_non_syn_a','syn_ag_mut_in_leaf','non_syn_ag_mut_in_leaf','syn_ag_mut_rate','non_syn_ag_mut_rate','groups_of_edited_leaves','non_edited_leaves','strong_syn_sites','strong_non_syn_sites','expected_strong_nonsyn_sites','strong_nonsyn_sites_excess','expected_nonusn_EG_mutations','std','actual_strong_nonsyn_eg_mutations','excess_of_unmutated_sites','p'])
-                elif file_split[0]+'_'+file_split[1]=='no_depletion':
-                    new_s = new_s.reindex(index = ['ancestor','intermediate','leaf','combined_editing_level_method','strong_levels_lower_limit','strong_levels_upper_limit','intermediate_syn_a','intermediate_non_syn_a','syn_ag_mut_in_leaf','non_syn_ag_mut_in_leaf','syn_ag_mut_rate','non_syn_ag_mut_rate','groups_of_edited_leaves','non_edited_leaves','strong_syn_sites','strong_non_syn_sites','expected_strong_nonsyn_sites','strong_nonsyn_sites_excess','expected_nonsyn_EG_mutations_from_excess','expected_nonsyn_EG_mutations_from_expected','total_expected_EG_mutations','std','actual_strong_nonsyn_eg_mutations','excess_of_unmutated_sites','p'])
-    
+                new_s = new_s.reindex(index = ['ancestor','intermediate','leaf','optimized_adaptive_rate','optimized_percentile_of_observed_mutation',
+                                               'combined_editing_level_method','strong_levels_lower_limit','strong_levels_upper_limit','weak_levels_lower_limit','weak_levels_upper_limit',
+                                               'adaptive_rate','intermediate_syn_a','intermediate_non_syn_a','syn_ag_mut_in_leaf','non_syn_ag_mut_in_leaf',
+                                               'syn_ag_mut_rate','non_syn_ag_mut_rate',
+                                               'groups_of_edited_leaves','non_edited_leaves','weak_syn_sites','weak_nonsyn_sites',
+                                               'nonsyn_sites_depletion_factor','strong_syn_sites','strong_nonsyn_sites','adaptive_sites',
+                                               'expected_hp_strong_nonsyn_sites','strong_nonsyn_sites_excess',
+                                               'expected_nonsyn_EG_mutations_from_adaptive','expected_nonsyn_EG_mutations_from_expected_hp','expected_nonsyn_EG_mutations_from_excess',
+                                               'total_expected_EG_mutations','std','observed_strong_nonsyn_eg_mutations','p','strong_nonsyn_eg_mutations_rate',
+                                               'observed_strong_syn_eg_mutations','strong_syn_eg_mutations_rate','excess_of_unmutated_strong_nonsyn_sites'])
                 new_models_dict.update({name:new_s})
-        
         return new_models_dict
     
-    def plot_editing_sites_and_excess_of_unmutated_sites(path, model_dict, weak_level_lower_bound,strong_level_upper_bound,filter_str,model_type,editing_level_method,ancestor,intermediate,leaves=['sep','squ','bob','lin']):
-        
-        N=len(leaves)
-        data = []
-        for leaf in leaves:
-            if intermediate==['S','B']:
-                if leaf in ['bob','lin']:
-                    inter='B'
-                elif leaf in ['sep','squ']:
-                    inter='S'   
-            else:
-                inter=intermediate
-            k = ancestor+'_'+inter+'_'+leaf+'_'+filter_str+'_'+model_type+'_'+editing_level_method+'_strong_lower'+str(strong_level_upper_bound)+'_weak_upper'+str(weak_level_lower_bound)
-            data.append(models_dict[k])
-        actual_mut=[]
-        expected_mut=[]
-        stds=[]
-        for s in data:
-            actual_mut.append(s['actual_strong_nonsyn_eg_mutations'])
-            if model_type=='liberal':
-                expected_mut.append(s['total_expected_EG_mutations'])
-            elif model_type=='strict':
-                expected_mut.append(s['expected_nonusn_EG_mutations'])
-            stds.append(s['std'])
-        
-        if intermediate==['S','B']:
-            name=ancestor+'_'+'SB'+'_'+'_'+filter_str+'_'+model_type+'_'+editing_level_method+'_strong_lower'+str(strong_level_upper_bound)+'_weak_upper'+str(weak_level_lower_bound)
-        else:
-            name=ancestor+'_'+intermediate+'_'+'_'+filter_str+'_'+model_type+'_'+editing_level_method+'_strong_lower'+str(strong_level_upper_bound)+'_weak_upper'+str(weak_level_lower_bound)
-        
-        outpath=path+'mutations_decapods_comparison/'
-        if not os.path.exists(outpath):
-            os.makedirs(outpath)
-        
-        ind = np.arange(N)  
-        width = 0.35
-        p1 = plt.bar(ind, expected_mut, width, yerr=stds, color='salmon')
-        p2 = plt.plot(ind, actual_mut, marker="D", linestyle="", alpha = 0.8, color="b")
-        plt.title('Expected Mutations and Actual Mutation')
-        plt.xticks(ind, leaves)
-        plt.yticks(np.arange(0, max(expected_mut+actual_mut+stds)+10, 20))
-        plt.ylabel('Expected EG Mutations')
-        plt.legend((p2[0],), ('actual mutation',))
-        plt.savefig(outpath+'expected_EG_mutations_'+name+'.png')   
-        plt.close()
     
     def plot_p_values_matrix(path,name,results_df,intermediates_to_group = ['S','B']):
         
@@ -621,10 +755,8 @@ def collect_results_for_general_model_and_plot_probs(path, recalc=True):
                 model_name = row['combined_editing_level_method']+'_'+row['ancestor']+'_to_'+'/'.join(intermediates_to_group)+'_to_leaf'
             else:
                 model_name = row['combined_editing_level_method']+'_'+row['ancestor']+'_to_'+row['intermediate']+'_to_leaf'
-            if 'strict' in name or 'no_depletion' in name:    
-                levels_and_leaf = str(row['strong_levels_lower_limit'])+'_'+row['leaf']
-            if 'liberal' in name:
-                levels_and_leaf = str(row['weak_levels_upper_limit'])+'_'+str(row['strong_levels_lower_limit'])+'_'+row['leaf']
+            
+            levels_and_leaf = str(row['weak_levels_upper_limit'])+'_'+str(row['strong_levels_lower_limit'])+'_'+row['leaf']+'+adapR'+str(row['adaptive_rate'])
             p=row['p']
             if p == 'lam < 0':
                 p = np.nan
@@ -639,29 +771,12 @@ def collect_results_for_general_model_and_plot_probs(path, recalc=True):
         plt.savefig(path+title+'.png')
         plt.close()
     
-    def restor_and_plot_distributions(path, df, name, confidence_level=0.95, n=1000000):
+    def restor_and_plot_distributions(path, df, name, confidence_level=1, n=1000000, recalc=True):
         
-        def calc_strict_model_distribuation(syn_a,non_syn_a,syn_ag_mut,strong_syn_sites,strong_non_syn_sites,non_syn_ag_mut,confidence_level,n):
-
-            syn_ag_mut_rate = float(syn_ag_mut)/syn_a
-            p=float(strong_syn_sites)/syn_a
-            z = 1-(1-confidence_level)/2
-            
-            expected_non_syn_sites_dist = []
-            for i in range(n):
-                p_rand = np.random.normal(p,z*np.sqrt(p*(1-p)/syn_a))
-                lam = non_syn_a*p_rand
-                expected_non_syn_sites_dist.append(np.random.poisson(lam))
-            
-            expected_non_syn_eg_mut_dist = []
-            for i in range(n):
-                expected_eg_mut = (strong_non_syn_sites-expected_non_syn_sites_dist[i])*syn_ag_mut_rate
-                expected_non_syn_eg_mut_dist.append(np.random.poisson(expected_eg_mut))
-            
-            return expected_non_syn_eg_mut_dist
-
-
-        def calc_liberal_model_distribuation(syn_a,non_syn_a,syn_ag_mut,non_syn_ag_mut,weak_syn_sites,weak_non_syn_sites,strong_syn_sites,strong_non_syn_sites,confidence_level,n):
+        def calc_expected_mutations_distribution(expected_mut,excess_mut,adaptive_mut,
+                                                 syn_a,non_syn_a,syn_ag_mut,non_syn_ag_mut,weak_syn_sites,weak_non_syn_sites,
+                                                 strong_syn_sites,strong_hp_nonsyn_sites,adaptive_sites,confidence_level,
+                                                 n,fix_depletion,calc_expected_hp_sites_mutations,calc_adaptive_sites_mutations):
             
             syn_ag_mut_rate = float(syn_ag_mut)/syn_a
             non_syn_ag_mut_rate = float(non_syn_ag_mut)/non_syn_a
@@ -669,178 +784,117 @@ def collect_results_for_general_model_and_plot_probs(path, recalc=True):
             p_weak_nss=float(weak_non_syn_sites)/non_syn_a
             p_weak_ss=float(weak_syn_sites)/syn_a
             p_strong_ss=float(strong_syn_sites)/syn_a
+            if fix_depletion is not None:
+                depletion_factor = fix_depletion
             
             expected_non_syn_sites_dist = []
             for i in range(n):
-                p_weak_nss_rand = np.random.normal(p_weak_nss,z*np.sqrt(p_weak_nss*(1-p_weak_nss)/non_syn_a))
-                while p_weak_nss_rand<0:
+                if fix_depletion is None:
                     p_weak_nss_rand = np.random.normal(p_weak_nss,z*np.sqrt(p_weak_nss*(1-p_weak_nss)/non_syn_a))
-                p_weak_ss_rand = np.random.normal(p_weak_ss,z*np.sqrt(p_weak_ss*(1-p_weak_ss)/syn_a))
-                while p_weak_ss_rand<0:
+                    while p_weak_nss_rand<0 or p_weak_nss_rand>1:
+                        p_weak_nss_rand = np.random.normal(p_weak_nss,z*np.sqrt(p_weak_nss*(1-p_weak_nss)/non_syn_a))
                     p_weak_ss_rand = np.random.normal(p_weak_ss,z*np.sqrt(p_weak_ss*(1-p_weak_ss)/syn_a))
+                    while p_weak_ss_rand<0 or p_weak_nss_rand>1:
+                        p_weak_ss_rand = np.random.normal(p_weak_ss,z*np.sqrt(p_weak_ss*(1-p_weak_ss)/syn_a)) 
+                    depletion_factor=(p_weak_nss_rand/p_weak_ss_rand)
                 p_strong_ss_rand = np.random.normal(p_strong_ss,z*np.sqrt(p_strong_ss*(1-p_strong_ss)/syn_a))
-                while p_strong_ss_rand<0:
+                while p_strong_ss_rand<0 or p_strong_ss_rand>1:
                     p_strong_ss_rand = np.random.normal(p_strong_ss,z*np.sqrt(p_strong_ss*(1-p_strong_ss)/syn_a))
-                lam = (p_weak_nss_rand/p_weak_ss_rand)*p_strong_ss_rand*non_syn_a
-                expected_non_syn_sites_dist.append(np.random.poisson(lam))
                 
-            expected_non_syn_eg_mut_dist = []
+                lam = depletion_factor*p_strong_ss_rand*non_syn_a
+                if lam<strong_hp_nonsyn_sites:
+                    expected_non_syn_sites_dist.append(np.random.poisson(lam))
+                else:
+                    expected_non_syn_sites_dist.append(strong_hp_nonsyn_sites)
+                
             for i in range(n):
-                expected_eg_mut_from_excess = (strong_non_syn_sites-expected_non_syn_sites_dist[i])*syn_ag_mut_rate
-#                p_non_syn_ag_mut_rate_rand = np.random.normal(non_syn_ag_mut_rate,z*np.sqrt(non_syn_ag_mut_rate*(1-non_syn_ag_mut_rate)/non_syn_a))
-                p_non_syn_ag_mut_rate_rand = non_syn_ag_mut_rate
-                expected_eg_mut_from_expected_nss = expected_non_syn_sites_dist[i]*p_non_syn_ag_mut_rate_rand
-                expected_non_syn_eg_mut_dist.append(np.random.poisson(expected_eg_mut_from_excess)+np.random.poisson(expected_eg_mut_from_expected_nss))
                 
-            return expected_non_syn_eg_mut_dist
-        
-        def calc_no_depletion_factor_model_distribuation(syn_a,non_syn_a,syn_ag_mut,non_syn_ag_mut,strong_syn_sites,strong_non_syn_sites,confidence_level,n):
-                
-            syn_ag_mut_rate = float(syn_ag_mut)/syn_a
-            non_syn_ag_mut_rate = float(non_syn_ag_mut)/non_syn_a
-            z = 1-(1-confidence_level)/2
-            p_strong_ss=float(strong_syn_sites)/syn_a
-            
-            expected_non_syn_sites_dist = []
-            for i in range(n):
-                p_strong_ss_rand = np.random.normal(p_strong_ss,z*np.sqrt(p_strong_ss*(1-p_strong_ss)/syn_a))
-                while p_strong_ss_rand<0:
-                    p_strong_ss_rand = np.random.normal(p_strong_ss,z*np.sqrt(p_strong_ss*(1-p_strong_ss)/syn_a))
-                lam = p_strong_ss_rand*non_syn_a
-                expected_non_syn_sites_dist.append(np.random.poisson(lam))
-                
-            expected_non_syn_eg_mut_dist = []
-            for i in range(n):
-                expected_eg_mut_from_excess = (strong_non_syn_sites-expected_non_syn_sites_dist[i])*syn_ag_mut_rate
+                #calculate mean of expected mut from expected nonsyn sites, if calculation flag is on, and a mean is within feasible range. if not assume 0 mutations
                 p_non_syn_ag_mut_rate_rand = np.random.normal(non_syn_ag_mut_rate,z*np.sqrt(non_syn_ag_mut_rate*(1-non_syn_ag_mut_rate)/non_syn_a))
                 expected_eg_mut_from_expected_nss = expected_non_syn_sites_dist[i]*p_non_syn_ag_mut_rate_rand
-                expected_non_syn_eg_mut_dist.append(np.random.poisson(expected_eg_mut_from_excess)+np.random.poisson(expected_eg_mut_from_expected_nss))
+                if expected_eg_mut_from_expected_nss>0.0 and calc_expected_hp_sites_mutations:
+                    expected_eg_mut_from_expected_nss_rand = np.random.poisson(expected_eg_mut_from_expected_nss)
+                else:
+                    expected_eg_mut_from_expected_nss_rand=0.0
                 
-            return expected_non_syn_eg_mut_dist
-        
-        def update_table_and_plot_values(row,name,outpath,n=1000000,confidence_level=0.95):
+                #calculate mean of expected mut from excess of nonsyn sites, if mean is within feasible range. if not assume 0 mutations
+                expected_eg_mut_from_excess = (strong_hp_nonsyn_sites-expected_non_syn_sites_dist[i])*syn_ag_mut_rate
+                if expected_eg_mut_from_excess>0:
+                    expected_eg_mut_from_excess_rand=np.random.poisson(expected_eg_mut_from_excess)
+                else:
+                    expected_eg_mut_from_excess_rand=0.0
+                
+                #calculate mean of expected mut from adaptive sites, if calculation flag is on, and a mean is within feasible range. if not assume 0 mutations
+                expected_adptive_sites_mutations = adaptive_sites*p_non_syn_ag_mut_rate_rand
+                if expected_adptive_sites_mutations>0 and calc_adaptive_sites_mutations:
+                    expected_eg_mut_from_adaptive_rand=np.random.poisson(expected_adptive_sites_mutations)
+                else:
+                    expected_eg_mut_from_adaptive_rand=0.0
+                    
+                expected_mut.append(expected_eg_mut_from_expected_nss_rand)
+                excess_mut.append(expected_eg_mut_from_excess_rand)
+                adaptive_mut.append(expected_eg_mut_from_adaptive_rand)
+                
+    
+
+        def update_table_and_plot_values(row,name,outpath,n,confidence_level,recalc):
             
-            recalc=True
-            if 'strict' in name:
-                if any([row['combined_editing_level_method'] in ['minimal','maximal'],row['strong_levels_lower_limit'] in [0.15,0.2,0.3], any([s in name for s in ['iden0.5','iden0.7','range5','range15','range20','no_msa_filter']])]):
-                    recalc=False
-                    return row
-            elif 'no_depletion' in name:
-                if any([row['combined_editing_level_method'] in ['minimal','maximal'],row['strong_levels_lower_limit'] in [0.15,0.2,0.3], any([s in name for s in ['iden0.5','iden0.7','range5','range15','range20','no_msa_filter']])]):
-                    recalc=False
-                    return row
-            elif 'liberal' in name:
-                if any([row['combined_editing_level_method'] in ['minimal','maximal'],row['weak_levels_upper_limit'] in [0.01,0.02],row['strong_levels_lower_limit'] in [0.15,0.2,0.3], any([s in name for s in ['iden0.5','iden0.7','range5','range15','range20','no_msa_filter']])]):
-                    recalc=False
-                    return row
+            if eval(row['optimized_adaptive_rate']) or any([row['strong_levels_lower_limit']!=0.1, row['weak_levels_upper_limit']!=0.05]):
+                recalc=False
             
             if recalc:
-                try:
-                    if 'strict' in name:
-                        fig_name=name+'_'+row['ancestor']+'_'+row['intermediate']+'_'+row['leaf']+'_'+row['combined_editing_level_method']+'_strong_'+str(row['strong_levels_lower_limit'])+'_'+str(row['strong_levels_upper_limit'])
-                        print(fig_name)
-                        expected_non_syn_eg_mut_dist=calc_strict_model_distribuation(row['intermediate_syn_a'],row['intermediate_non_syn_a'],
-                                                                                     row['syn_ag_mut_in_leaf'],row['strong_syn_sites'],
-                                                                                     row['strong_non_syn_sites'],row['non_syn_ag_mut_in_leaf'],confidence_level,n)
-                    elif 'liberal' in name:
-                        fig_name=name+'_'+row['ancestor']+'_'+row['intermediate']+'_'+row['leaf']+'_'+row['combined_editing_level_method']+'_strong_'+str(row['strong_levels_lower_limit'])+'_'+str(row['strong_levels_upper_limit'])+'_weak_'+str(row['weak_levels_lower_limit'])+'_'+str(row['weak_levels_upper_limit'])
-                        print(fig_name)
-                        expected_non_syn_eg_mut_dist=calc_liberal_model_distribuation(row['intermediate_syn_a'],row['intermediate_non_syn_a'],
-                                                                                      row['syn_ag_mut_in_leaf'],row['non_syn_ag_mut_in_leaf'],
-                                                                                      row['weak_syn_sites'],row['weak_nonsyn_sites'],
-                                                                                      row['strong_syn_sites'],row['strong_non_syn_sites'],confidence_level,n)
-                    elif 'no_depletion' in name:
-                        fig_name=name+'_'+row['ancestor']+'_'+row['intermediate']+'_'+row['leaf']+'_'+row['combined_editing_level_method']+'_strong_'+str(row['strong_levels_lower_limit'])+'_'+str(row['strong_levels_upper_limit'])
-                        print(fig_name)
-                        expected_non_syn_eg_mut_dist=calc_no_depletion_factor_model_distribuation(row['intermediate_syn_a'],row['intermediate_non_syn_a'],
-                                                                                                  row['syn_ag_mut_in_leaf'],row['non_syn_ag_mut_in_leaf'],
-                                                                                                  row['strong_syn_sites'],row['strong_non_syn_sites'],confidence_level,n)
-
-                    actual_mutations=row['actual_nonsyn_eg_mutations']
-                    new_p_val = sum([1 for i in expected_non_syn_eg_mut_dist if i<row['actual_nonsyn_eg_mutations']])/float(n)
-                    row['std']=np.std(expected_non_syn_eg_mut_dist)
-                    row['p']=new_p_val
-                    if row['p']==0.0:
-                        text='G mut: '+str(int(actual_mutations))+'\nP<1e-6'
-                    else:
-#                        text='G mut: '+str(int(actual_mutations))+'\nP='+str(round(new_p_val,3-int(floor(log10(abs(new_p_val))))-1))
-                        text='G mut: '+str(int(actual_mutations))+'\nP='+str(pval_str(new_p_val))
-    
-    
-                    minimal_bin=min([actual_mutations]+expected_non_syn_eg_mut_dist)-5
-                    maximal_bin=max([actual_mutations]+expected_non_syn_eg_mut_dist)+5
-                    bins=np.arange(minimal_bin,maximal_bin)
-                    fig, ax = plt.subplots()
-                    sns.distplot(expected_non_syn_eg_mut_dist,kde=False,norm_hist=False,bins=bins,color='red')
-#                    sns.kdeplot(expected_non_syn_eg_mut_dist, bw=3, color='r')
-#                    sns.distplot(expected_non_syn_eg_mut_dist,hist=True,kde=False,bins=bins)
-#                    sns.distplot(expected_non_syn_eg_mut_dist,hist=True,kde=False,fit=stats.norm(loc=np.mean(expected_non_syn_eg_mut_dist),scale=row['std']))
-#                    sns.distplot(expected_non_syn_eg_mut_dist,hist=False,kde=False,fit=stats.norm)
-#                    sns.distplot(expected_non_syn_eg_mut_dist,hist=False,rug=True)
-#                    plt.title(row['intermediate']+' to '+row['leaf'])
-#                    plt.ylabel('Density') 
-#                    plt.xlabel('Expected Mutations')
-                    plt.axvline(x=actual_mutations, color='black', linestyle='--')
-#                    plt.text(actual_mutations+1,0.01,text,horizontalalignment='left',fontsize=15)
-#                    trans = transforms.blended_transform_factory(ax.transData(), ax.transAxes())
-                    plt.text(0.75,0.05,text,horizontalalignment='left',fontsize=15, transform=ax.transAxes)
-                    
-                    plt.xlim(min([actual_mutations-15,min(expected_non_syn_eg_mut_dist)]),max(expected_non_syn_eg_mut_dist)+10)
-#                    plt.tick_params(top=False, right=False, axis='both', which='major', labelsize=20)           
-                    plt.tick_params(axis='both', which='major', labelsize=15)  
-                    plt.gca().spines['top'].set_visible(False)
-                    plt.gca().spines['right'].set_visible(False)
-                    plt.savefig(outpath+fig_name+'.jpg')
-                    plt.close()
+                fig_name=name+'_'+row['ancestor']+'_'+row['intermediate']+'_'+row['leaf']+'_'+row['combined_editing_level_method']+'_strong'+str(row['strong_levels_lower_limit'])+'_'+str(row['strong_levels_upper_limit'])+'_weak'+str(row['weak_levels_lower_limit'])+'_'+str(row['weak_levels_upper_limit'])+'_adapR'+str(row['adaptive_rate'])
+                print(fig_name)
+                expected_mut,excess_mut,adaptive_mut = [],[],[]
+                strong_hp_nonsyn_sites = row['strong_nonsyn_sites']-row['adaptive_sites']
+                calc_expected_mutations_distribution(expected_mut,excess_mut,adaptive_mut,
+                                                     row['intermediate_syn_a'],row['intermediate_non_syn_a'],row['syn_ag_mut_in_leaf'],row['non_syn_ag_mut_in_leaf'],
+                                                     row['weak_syn_sites'],row['weak_nonsyn_sites'],row['strong_syn_sites'],
+                                                     strong_hp_nonsyn_sites,row['adaptive_sites'],1,1000000,None,True,False)
+                expected_non_syn_eg_mut_dist = [sum(i) for i in zip(expected_mut,excess_mut,adaptive_mut)]
                 
-                    
-                except Exception as e:
-                    row['p']=str(e)
-                    row['std']=str(e)
-                    print('Err in function update_table_and_plot_values '+str(e))
-                    
-                return row
-                    
+                actual_mutations=row['observed_strong_nonsyn_eg_mutations']
+                new_p_val = sum([1 for i in expected_non_syn_eg_mut_dist if i<row['observed_strong_nonsyn_eg_mutations']])/float(n)
+                row['std']=np.std(expected_non_syn_eg_mut_dist)
+                row['p']=new_p_val
+                if row['p']==0.0:
+                    text='G mut: '+str(int(actual_mutations))+'\nP<1e-6 *'
+                else:
+                    text='G mut: '+str(int(actual_mutations))+'\nP='+str(pval_str(new_p_val))
+                minimal_bin=min([actual_mutations]+expected_non_syn_eg_mut_dist)-5
+                maximal_bin=max([actual_mutations]+expected_non_syn_eg_mut_dist)+5
+                bins=np.arange(minimal_bin,maximal_bin)
+                fig, ax = plt.subplots(figsize=(10,10))
+                sns.distplot(expected_non_syn_eg_mut_dist,kde=False,norm_hist=False,bins=bins,color='red')
+                # sns.displot(expected_non_syn_eg_mut_dist,kde=False,bins=bins,color='red')
+                plt.axvline(x=actual_mutations, color='black', linestyle='--')
+                plt.text(0.75,0.05,text,horizontalalignment='left',fontsize=25, transform=ax.transAxes)      
                 
+                plt.xlim(min([actual_mutations-15,min(expected_non_syn_eg_mut_dist)]),max(max(expected_non_syn_eg_mut_dist),actual_mutations)+10)
+                plt.tick_params(axis='both', which='major', labelsize=25)  
+                plt.gca().spines['top'].set_visible(False)
+                plt.gca().spines['right'].set_visible(False)
+                plt.savefig(outpath+fig_name+'.jpg')
+                plt.close()
+                    
+            return row
+                    
+            
         outpath=path+'expected_mutations_distributions/'
         if not os.path.exists(outpath):
             os.makedirs(outpath)
-        results_df=df.apply(lambda row: update_table_and_plot_values(row,name,outpath,n=n,confidence_level=confidence_level), axis=1)
+        results_df=df.apply(lambda row: update_table_and_plot_values(row,name,outpath,n,confidence_level,recalc), axis=1)
         return results_df
-        
-    results_dfs_dict = {}
-#    for model_type in ['liberal','strict','no_depletion']:
-#    for model_type in ['no_depletion']:
-    # for model_type in ['liberal','strict']:
-    for model_type in ['liberal']:
+    
 
+    #The function starts here!!!!
+    results_dfs_dict = {}
+    for model_type in models:
+            
         try:
             writer = pd.ExcelWriter(path+model_type+'.xlsx', engine='xlsxwriter')
-            name = model_type+'_no_msa_filter'
-            models_dict = convert_dfs_csv_to_xlsx(path+'*no_msa_filter_'+model_type)
-            models_dict = convert_models_dfs_back_to_series(models_dict)
-            df=pd.concat([s for s in models_dict.values()], axis=1, sort=False) 
-            df = df.transpose()
-            if recalc:    
-                results_df = restor_and_plot_distributions(path,df,name)
-            else:
-                results_df = df
-            plot_p_values_matrix(path,name,results_df)
-            results_df.to_excel(writer, sheet_name = name)
-            results_dfs_dict.update({'no_filter':results_df})
-            # filter_str='no_msa_filter'
-            # ancestor='N1'
-#            for editing_level_method in ['average','maximal','minimal']:
-#                for strong_level_upper_bound in [0.1,0.15,0.2,0.3]:
-#                    for weak_level_lower_bound in [0.01,0.02,0.05]:
-#                        for intermediate in ['D',['S','B']]:
-#                            try:
-#                                plot_editing_sites_and_excess_of_unmutated_sites(path, models_dict, weak_level_lower_bound,strong_level_upper_bound,filter_str,model_type,editing_level_method,ancestor,intermediate,leaves=['sep','squ','bob','lin'])
-#                            except Exception as e:
-#                                print('Err in function plot_editing_sites_and_excess_of_unmutated_sites'+str(e))
-                                
-            for iden in [0.3,0.5,0.7]:
-                for r in [5,10,15,20]:        
+            for iden in iden_list:
+                for r in iden_range_list:        
                     name = model_type+'_iden'+str(iden)+'_in_range'+str(r)
                     models_dict = convert_dfs_csv_to_xlsx(path+'*iden'+str(iden)+'_in_range'+str(r)+'_'+model_type)
                     models_dict = convert_models_dfs_back_to_series(models_dict)
@@ -853,22 +907,14 @@ def collect_results_for_general_model_and_plot_probs(path, recalc=True):
                     plot_p_values_matrix(path,name,results_df)
                     results_df.to_excel(writer, sheet_name = name)
                     results_dfs_dict.update({'iden'+str(iden)+'_range'+str(r):results_df})
-                    # filter_str='iden'+str(iden)+'_in_range'+str(r)
-#                    for editing_level_method in ['average','maximal','minimal']:
-#                        for strong_level_upper_bound in [0.1,0.15,0.2,0.3]:
-#                            for weak_level_lower_bound in [0.01,0.02,0.05]:
-#                                for intermediate in ['D',['S','B']]:
-#                                    try:
-#                                        plot_editing_sites_and_excess_of_unmutated_sites(path, models_dict, weak_level_lower_bound,strong_level_upper_bound,filter_str,model_type,editing_level_method,ancestor,intermediate,leaves=['sep','squ','bob','lin'])
-#                                    except Exception as e:
-#                                        print('Err in function plot_editing_sites_and_excess_of_unmutated_sites'+str(e))
             writer.save()  
+
         except Exception as e:
             print(e)
             
     return results_dfs_dict
             
-
+        
 def calc_dn_ds():
     lst = ['A','T','C','G']
     dn=0
@@ -883,19 +929,14 @@ def calc_dn_ds():
                 if n=="A":
                     new_c = c[:i] + "G" + c[i+1:]
                     print(new_c)
-                    if str(Seq(c,generic_dna).translate())==str(Seq(new_c,generic_dna).translate()):
+                    if str(Seq(c).translate())==str(Seq(new_c).translate()):
                         ds+=1
                     else:
                         dn+=1
     print(str(ds/(dn+ds)))
-    
-    
-   
-        
 
-def create_tree_relations_dicts(tree_str, is_str=False):
-    
-#    leaves_to_ancestors_dict, ancestors_to_leaves_dict, ancestors_to_downstream_ancestors_dict, ancestors_to_upstream_ancestors_dict = create_tree_relations_dicts(tree_str) 
+
+def create_tree_relations_dicts(tree_str, is_str=True):
     
     if is_str:
         tree = Phylo.read(StringIO(tree_str), "newick")
@@ -906,7 +947,6 @@ def create_tree_relations_dicts(tree_str, is_str=False):
     leaves_to_ancestors_dict={}
     leaves=tree.get_terminals()
     for l in leaves:
-#        handle = StringIO(tree_
         ancestors = (root_name,)
         for n in tree.get_path(l.name):
             if n.name != l.name:
@@ -937,37 +977,7 @@ def create_tree_relations_dicts(tree_str, is_str=False):
     
     return tree, leaves_to_ancestors_dict, ancestors_to_leaves_dict, ancestors_to_downstream_ancestors_dict, ancestors_to_upstream_ancestors_dict
                 
-#def plot_p_values_matrix(path,name,models_dict,intermediates_to_group = ['S','B']):
-#    
-#    title = name 
-#    data = []
-#    
-#    for k, s in models_dict.items():
-#        if s['intermediate'] in intermediates_to_group:
-#            model_name = s['combined_editing_level_method']+'_'+s['ancestor']+'_to_'+'/'.join(intermediates_to_group)+'_to_leaf'
-#        else:
-#            model_name = s['combined_editing_level_method']+'_'+s['ancestor']+'_to_'+s['intermediate']+'_to_leaf'
-#        if 'strict' in k or 'no_depletion' in k:    
-#            levels_and_leaf = str(s['strong_levels_lower_limit'])+'_'+s['leaf']
-#        if 'liberal' in name:
-#            levels_and_leaf = str(s['weak_levels_upper_limit'])+'_'+str(s['strong_levels_lower_limit'])+'_'+s['leaf']
-#        p=s['p']
-#        if p == 'lam < 0':
-#            p = np.nan
-#        data+=[(model_name,levels_and_leaf,p,)]
-#    
-#    df = pd.DataFrame(data=data, columns=['branches','levels_bounds_and_leaves','p'])
-#    pivot_df = df.pivot("branches", "levels_bounds_and_leaves", "p")
-#    plt.figure(figsize=(45,12))
-#    ax = sns.heatmap(pivot_df,annot=True,vmin=0.0, vmax=0.1,cmap='coolwarm',linewidths=.5)
-#    ax.set_yticklabels(ax.get_yticklabels(), rotation=0)
-#    plt.savefig(path+title+'.png')
-#    df=pd.concat([s for s in models_dict.values()], axis=1, sort=False)    
-#    return df
-
-
-    
-    
+   
 def plt_excess_of_unmutated_sites():
     
     plt.rcdefaults()
@@ -984,23 +994,18 @@ def plt_excess_of_unmutated_sites():
     ax.invert_yaxis()  # labels read top-to-bottom
     ax.set_xlabel('Excess of unmutated sites\n(expected mut. - actual mut.)')
     plt.axvline(x=0, color='black',linestyle='--')
-    
     plt.show()
-    
-    
-    
+    plt.close()
+       
 
 def plot_conserved_sites_substitutions(path,rates):
-    
-    
     bars = ()
     y_pos =np.arange(len(bars))
     plt.bar(y_pos, rates, color=['grey','black','red','blue'])
     plt.xticks(y_pos, bars)
     plt.savefig(path+'Gsubs_in_consereved_sites.jpg')
     plt.close()
-    
-    
+     
 
 def get_uniqe_proteins_rows(df,animals=['apl','nau','oct','bim','sep','squ']):
     
@@ -1057,12 +1062,13 @@ def collect_editing_sites(mat, edited_leaves, non_edited_leaves, editing_level_m
         elif editing_level_method=='maximal':
             return max([row[a+'_editing_level'] for a in edited_animals])
 
-              
+
     def in_unification_of_intersections(row, edited_leaves,non_edited_leaves):
         in_unified_intersections = 0
         for group in edited_leaves:
             if len(group)==sum([row[a+'_edited'] for a in group]):
                 in_unified_intersections=1
+                break
         for leaf in non_edited_leaves:
             if row[leaf+'_edited']==1:
                 in_unified_intersections=0
@@ -1086,19 +1092,6 @@ def plot_subs_rates(data,name,path):
     bar_width = 0.12
     gap = 0
     
-    def pval_str(p):
-        if p>0.05:
-            pvals_str='ns'
-        elif p<0.0001:
-            pvals_str='****'
-        elif p<0.001:
-            pvals_str='***'
-        elif p<0.01:
-            pvals_str='**'
-        elif p<0.05:
-            pvals_str='*'
-        return pvals_str
-    
     pvals = []
     for d in data:
         pvals += [d[1][4],d[2][4]]  
@@ -1116,19 +1109,14 @@ def plot_subs_rates(data,name,path):
             pvals_str_list.append('*')
     
     x_high = [x[0]-1.5*bar_width-0.5*gap,x[0]+1.5*bar_width+0.5*gap,x[1]-1.5*bar_width-0.5*gap,x[1]+1.5*bar_width+0.5*gap]
-#    high_labels = ['ancestral A\n'+str(pvals_str_list[0]),'ancestral G\n'+str(pvals_str_list[1]),'ancestral A\n'+str(pvals_str_list[2]),'ancestral G\n'+str(pvals_str_list[3])]
     high_labels = ['ancestral A','ancestral G','ancestral A','ancestral G']
-    
     xs = list(x_high)+list(x)
-#    editing_levels = ['\n\nEditing levels: '+str(d[0][0])+'-'+str(d[0][1]) for d in data]
     editing_levels = ['\nWeak sites','\nStrong sites']
     labels = high_labels+editing_levels
-
     ancestralA_syn = [d[1][0] for d in data]
     ancestralA_syn_err = [d[1][1] for d in data]
     ancestralA_nonsyn = [d[1][2] for d in data]
     ancestralA_nonsyn_err = [d[1][3] for d in data]
-    
     ancestralGsyn = [d[2][0] for d in data]
     ancestralGsyn_err = [d[2][1] for d in data]
     ancestralG_nonsyn = [d[2][2] for d in data]
@@ -1141,13 +1129,9 @@ def plot_subs_rates(data,name,path):
     
     
     max_y = max(ancestralA_syn+ancestralA_nonsyn+ancestralGsyn+ancestralG_nonsyn)
-#    ticks = ax.get_xticks()
     ticks = [-0.3,0.05,0.7,1.05]
     print(pvals_str_list)
-#    print(ticks) #[-0.4 -0.2  0.   0.2  0.4  0.6  0.8  1.   1.2  1.4]
-#    print(len(ticks))
-    for i,t in enumerate(ticks):
-        
+    for i,t in enumerate(ticks):   
         plt.plot([t,t+0.25],[max_y*1.25,max_y*1.25],color = 'black')
         ps=pvals_str_list[i]
         if ps=='****':
@@ -1158,10 +1142,8 @@ def plot_subs_rates(data,name,path):
             align = 0.10
         if ps=='*':
             align = 0.11
-        
         plt.text(t+align,max_y*1.27,ps,size=25)
          
-    
     ax.set_xticks(xs)
     ax.set_xticklabels(labels)
     plt.tick_params(axis='both', which='major', labelsize=25)
@@ -1169,7 +1151,6 @@ def plot_subs_rates(data,name,path):
     ax.set_ylim([0,max_y*1.35])
     plt.savefig(path+name+'.jpg')
     plt.close()
-
 
 
 def calc_substitutions_per_ancestral_nucl(sites_df,levels_ranges,intermediate,animals_to_check_subs,count_subs_multiple_times=True):
@@ -1184,10 +1165,8 @@ def calc_substitutions_per_ancestral_nucl(sites_df,levels_ranges,intermediate,an
     columns = ['editing levels','ancesA_syn','ancesA_syn_subs','ancesA_nonsyn','ancesA_nonsyn_subs','ancesG_syn','ancesG_syn_subs','ancesG_nonsyn','ancesG_nonsyn_subs']
     for el in levels_ranges:
         sites_in_el = sites_df[np.logical_and(sites_df['combined_editing_level']>el[0],sites_df['combined_editing_level']<=el[1])]
-
         ancestralA = sites_in_el[sites_in_el['N1_nuc']=="A"]
         ancestralG = sites_in_el[sites_in_el['N1_nuc']=="G"]
-        
         ancestralA_syn_n=float(len(ancestralA[ancestralA[intermediate+'_AG_recoding']==0]))
         ancestralA_syn_subs_n=float(ancestralA[ancestralA[intermediate+'_AG_recoding']==0]['Gsubs'].sum())
         ancestralA_nonsyn_n=float(len(ancestralA[ancestralA[intermediate+'_AG_recoding']==1]))
@@ -1196,28 +1175,20 @@ def calc_substitutions_per_ancestral_nucl(sites_df,levels_ranges,intermediate,an
         ancestralG_syn_subs_n=float(ancestralG[ancestralG[intermediate+'_AG_recoding']==0]['Gsubs'].sum())
         ancestralG_nonsyn_n=float(len(ancestralG[ancestralG[intermediate+'_AG_recoding']==1]))
         ancestralG_nonsyn_subs_n=float(ancestralG[ancestralG[intermediate+'_AG_recoding']==1]['Gsubs'].sum())
-        
         ancestralA_syn_rate = ancestralA_syn_subs_n/ancestralA_syn_n
         ancestralA_syn_err = np.sqrt(ancestralA_syn_rate*(1-ancestralA_syn_rate)/ancestralA_syn_n)
-        
         ancestralA_nonsyn_rate = ancestralA_nonsyn_subs_n/ancestralA_nonsyn_n
         ancestralA_nonsyn_err = np.sqrt(ancestralA_nonsyn_rate*(1-ancestralA_nonsyn_rate)/ancestralA_nonsyn_n)
-        
         ancestralG_syn_rate = ancestralG_syn_subs_n/ancestralG_syn_n
         ancestralG_syn_err = np.sqrt(ancestralG_syn_rate*(1-ancestralG_syn_rate)/ancestralG_syn_n)
-        
         ancestralG_nonsyn_rate = ancestralG_nonsyn_subs_n/ancestralG_nonsyn_n
         ancestralG_nonsyn_err = np.sqrt(ancestralG_nonsyn_rate*(1-ancestralG_nonsyn_rate)/ancestralG_nonsyn_n)
-        
-    
         pA=stats.fisher_exact([[ancestralA_syn_n,ancestralA_syn_subs_n],[ancestralA_nonsyn_n,ancestralA_nonsyn_subs_n]])[1]
         pG=stats.fisher_exact([[ancestralG_syn_n,ancestralG_syn_subs_n],[ancestralG_nonsyn_n,ancestralG_nonsyn_subs_n]])[1]
         rates.append((el,(ancestralA_syn_rate,ancestralA_syn_err,ancestralA_nonsyn_rate,ancestralA_nonsyn_err,pA),(ancestralG_syn_rate,ancestralG_syn_err,ancestralG_nonsyn_rate,ancestralG_nonsyn_err,pG)))
-
         data.append((el,ancestralA_syn_n,ancestralA_syn_subs_n,ancestralA_nonsyn_n,ancestralA_nonsyn_subs_n,ancestralG_syn_n,ancestralG_syn_subs_n,ancestralG_nonsyn_n,ancestralG_nonsyn_subs_n))
     
     data_df = pd.DataFrame(data = data, columns=columns)
-        
     return sites_df, rates, data_df
 
 
@@ -1248,21 +1219,16 @@ def calc_substitutions_per_editing_type(sites_df,levels_ranges,intermediate,anim
         syn = sites_in_el[sites_in_el['editing_type']=="syn"]
         res = sites_in_el[sites_in_el['editing_type']=="res"]
         div = sites_in_el[sites_in_el['editing_type']=="div"]
-
-        
         syn_n=float(len(syn))
         syn_subs_n=float(syn['Gsubs'].sum())
         res_n=float(len(res))
         res_subs_n=float(res['Gsubs'].sum())
         div_n=float(len(div))
         div_subs_n=float(div['Gsubs'].sum())
-        
         syn_rate = syn_subs_n/syn_n
         syn_err = np.sqrt(syn_rate*(1-syn_rate)/syn_n)
-        
         res_rate = res_subs_n/res_n
         res_err = np.sqrt(res_rate*(1-res_rate)/res_n)
-        
         div_rate = div_subs_n/div_n
         div_err = np.sqrt(div_rate*(1-div_rate)/div_n)
         
@@ -1270,17 +1236,12 @@ def calc_substitutions_per_editing_type(sites_df,levels_ranges,intermediate,anim
         p_div=stats.fisher_exact([[syn_n,syn_subs_n],[div_n,div_subs_n]])[1]
         p_res_div=stats.fisher_exact([[res_n,res_subs_n],[div_n,div_subs_n]])[1]
         rates.append((el,(syn_rate,syn_err,res_rate,res_err,p_res,div_rate,div_err,p_div,p_res_div)))
-
         data.append((el,syn_n,syn_subs_n,res_n,res_subs_n,p_res,div_n,div_subs_n,p_div,p_res_div))
     
     data_df = pd.DataFrame(data = data, columns=columns)
-        
     return sites_df, rates, data_df
 
 
-
-
-    
 def get_all_groups_of_edited_sites(tree_str,ancestor,animals=['oct','bim','sep','squ','lin','bob'],rooted=True):
 
     tree = Phylo.read(StringIO(tree_str), "newick")
@@ -1293,7 +1254,7 @@ def get_all_groups_of_edited_sites(tree_str,ancestor,animals=['oct','bim','sep',
     return edited_leaves
 
 
-def get_groups_of_edited_and_unedited_sites(tree_str,ancestor,intermediate,leaf,rooted=True):
+def get_groups_of_edited_and_unedited_sites(tree_str,leaf,intermediate,ancestor=None,rooted=True):
 
     
     tree, leaves_to_ancestors_dict, ancestors_to_leaves_dict, ancestors_to_downstream_ancestors_dict, ancestors_to_upstream_ancestors_dict = create_tree_relations_dicts(tree_str) 
@@ -1321,25 +1282,41 @@ def get_groups_of_edited_and_unedited_sites(tree_str,ancestor,intermediate,leaf,
     edited_leaves = [x for x in edited_leaves if x]
     
     non_edited_leaves = []
-    all_ancestors_leaves=ancestors_to_leaves_dict[ancestor]
-    all_root_leaves=ancestors_to_leaves_dict[tree.root.name]
-    for l in all_root_leaves:
-        if l not in all_ancestors_leaves:
-            non_edited_leaves.append(l)
-    non_edited_leaves = non_edited_leaves    
+    if ancestor is not None:
+        all_ancestors_leaves=ancestors_to_leaves_dict[ancestor]
+        all_root_leaves=ancestors_to_leaves_dict[tree.root.name]
+        for l in all_root_leaves:
+            if l not in all_ancestors_leaves:
+                non_edited_leaves.append(l)
+        non_edited_leaves = non_edited_leaves    
     return edited_leaves, non_edited_leaves
     
+
 def determine_editing_for_ancestor(row,edited_leaves,ancestor):
-    
+    """
+    for an MSA column row data (pd.Series expects df row)
+    Determine if ancestor (str) is edited, 
+    based on edited_leaves (expected list of tumples) determined by a tree topology from (e.g. from get_groups_of_edited_and_unedited_sites function)
+    """
     if row[ancestor+'_nuc']=="A":
         edited = 0
         for g in edited_leaves:
             if all([row[a+'_edited']==1 for a in g]):
                 edited=1
+                break
         return edited
     else:
         return 0
     
+def clacESmutations(msa_df, tree_str, leaf ,intermediate, mutated_leaf_nucl='G', ancestor=None, rooted=True):
+    
+    edited_leaves,non_edited_leaves = get_groups_of_edited_and_unedited_sites(tree_str,leaf,intermediate,ancestor=ancestor,rooted=rooted)
+    msa_df[intermediate+'_edited']=msa_df.apply(lambda row: determine_editing_for_ancestor(row, edited_leaves, ancestor))
+    edited = msa_df[msa_df[intermediate+'_edited']==1]
+    mutations = edited[edited[leaf+'_nuc']==mutated_leaf_nucl]
+    
+
+
 def reconstruct_trinity_location(row, animals, trinity_dict, complementary_loc_for_antisense=True):
 
     for a in animals:
@@ -1347,9 +1324,7 @@ def reconstruct_trinity_location(row, animals, trinity_dict, complementary_loc_f
         trinity_df=trinity_dict[a]
         
         trinity_row = trinity_df.loc[row[a+'_trinity_component'],:]
-#        pri4w)
         strand=trinity_row['strand']
-        
         if row[a+'_coding_location']!='gap':
             
             if strand=="+":
@@ -1359,13 +1334,12 @@ def reconstruct_trinity_location(row, animals, trinity_dict, complementary_loc_f
                 if complementary_loc_for_antisense:
                     row[a+'_trinity_locatin_base1']=len(trinity_row['sequence'])-anti_sense_location_base_1
                 else:
-                    row[a+'_trinity_locatin_base1']=anti_sense_location_base_1
-                
+                    row[a+'_trinity_locatin_base1']=anti_sense_location_base_1     
         else:
             row[a+'_trinity_locatin_base1']='-'
-
     return row
     
+
 def reorganize_sites_data(path,animals,ancestors,tree_strs,trinity_dict):
 
     df = pd.read_csv(path,sep='\t',index_col=False)
@@ -1375,34 +1349,25 @@ def reorganize_sites_data(path,animals,ancestors,tree_strs,trinity_dict):
     for a in animals:
         df[a+'_aa_swap'] = df.apply(lambda row: row[a+'_original_aa']+row[a+'_AG_target_aa'] if row[a+'_editing_level']>0 else row[a+'_original_aa']+'-', axis=1)
     
-#    handle = StringIO(tree_str)
-#    tree = Phylo.read(handle, "newick")
     for a in ancestors:
         edited_leaves = get_all_groups_of_edited_sites(tree_str,a)
         df[a+'_edited'] = df.apply(lambda row: determine_editing_for_ancestor(row,edited_leaves,a), axis=1)
         df[a+'_aa_swap'] = df.apply(lambda row: row[a+'_original_aa']+row[a+'_AG_target_aa'] if row[a+'_edited']==1 else row[a+'_original_aa']+'-', axis=1)
         
     df['alignment_position_base1'] = df.apply(lambda row: row['alignment_pos_base_0']+1, axis=1)
-    
     columns = ['super_orthologs_id','alignment_position_base1']
-
     columns += [a+'_trinity_component' for a in animals]
     columns += [a+'_trinity_locatin_base1' for a in animals]
     columns += [a+'_nuc' for a in animals+ancestors]
-#    columns += [a+'_coding_location' for a in animals]
     columns += [a+'_editing_level' for a in animals if a not in ['apl','nau']]
     columns += [a+'_aa_swap' for a in animals if a not in ['apl','nau']]
     columns += [a+'_aa_swap' for a in ancestors]
-#    columns += [a+'_aa_swap_wrt_to_AG_sub' for a in ancestors]
-
     df = df[columns].copy()
-
     df.rename(columns={'super_orthologs_id':'orthologs_id','alignment_pos_base_1':'msa_location_base1'}, inplace=True)
     for a in animals+ancestors:
         for c in list(df.columns):
             if a+"_" in c:
                 df.rename(columns={c:c.replace(a,animals_names_dict[a])}, inplace=True)
-
     df.to_excel(path+'_relevant_fields.xlsx',index=False)
     df.to_csv(path+'_relevant_fields.txt',index=False,sep='\t')
     return df
@@ -1445,7 +1410,7 @@ def plot_substitutions_by_type(path, data, types=['synonymous','restorative','di
     ax.plot([1,2],[0.25,0.25],color = 'black')
     ax.plot([1,1],[0.25,0.24],color = 'black')    
     ax.plot([2,2],[0.25,0.24],color = 'black')    
-    ax.text(1.45,0.26,pval_str(div_res_p),size=txt_size)
+    ax.text(1.3,0.26,pval_str(div_res_p),size=txt_size)
     
     plt.tick_params(axis='x', which='both', length=0, labelsize=30)
     plt.tick_params(axis='y', which='both', labelsize=30)
@@ -1454,17 +1419,6 @@ def plot_substitutions_by_type(path, data, types=['synonymous','restorative','di
     plt.close()
        
 
-#oct syn 15425 681198 nonsyn 27151 1651609
-#bim 8865 687196  15421 1664678
-#sep = 16425 650796 30411 1594042
-#squ = 8244 684107 14100 1637114
-#lin 10136 675324 17803 1621529
-#bob 4986 668266 8574 1651819
-#animals = ['vul','bim','sep','squ','lin','bob']
-#rates = [(0.022643930252290816,0.016439120881516146),(0.012900249710417406,0.00926365339122641),(0.025238323529954088,0.01907791639116159),(0.012050746447558642,0.008612717257319893),(0.015009091932168855,0.010979143758761021),(0.007461100819134895,0.005190641347508414)]
-#animals = ['O.vul','O.bim','S.ofi','D.pea','S.lin','Eup']
-#path = 'E:/RNA_editing_Large_files/Phylogeny/results/coleoids/our_model/rooted/'
-#plot_nonsyn_to_syn_depletions(animals, rates, path)
 def plot_nonsyn_to_syn_depletions(animals, rates, errs, path):
     
     labels = animals
@@ -1472,14 +1426,11 @@ def plot_nonsyn_to_syn_depletions(animals, rates, errs, path):
     non_syn_rates = [r[1] for r in rates]
     syn_errs =  [e[0] for e in errs]
     nonsyn_errs = [e[1] for e in errs]
-
     x = np.arange(len(labels))  # the label locations
     width = 0.35  # the width of the bars
-
     fig, ax = plt.subplots()
     rects1 = ax.bar(x - width/2, syn_rates, width, label='Syn',color='grey',yerr=syn_errs,error_kw=dict(capsize=0))
     rects2 = ax.bar(x + width/2, non_syn_rates, width, label='non-Syn',color='red',yerr=nonsyn_errs,error_kw=dict(capsize=0))
-
     # Add some text for labels, title and custom x-axis tick labels, etc.
     ax.set_ylabel('Editing Events Rate')
     ax.set_xticks(x)
@@ -1489,12 +1440,10 @@ def plot_nonsyn_to_syn_depletions(animals, rates, errs, path):
     ax.set_ylim([0,max_y*1.3])
     tickes = ax.get_xticks()       
     for i,t in enumerate(tickes):
-        plt.plot([t-0.3,t+0.3],[max_y*1.1,max_y*1.1], color="black")
+        plt.plot([t-0.3,t+0.2],[max_y*1.1,max_y*1.1], color="black")
         val = rates[i][1]/rates[i][0]
         val = round_siginficant(val)
         plt.text(t-0.2,max_y*1.12, str(val), color="black")
-
-#    ax.legend()
     plt.savefig(path+'events_rates.jpg')
     plt.close()
 
@@ -1511,91 +1460,6 @@ def calculates_odds_ratios_z_score(a1,a2,b1,b2,c1,c2,d1,d2):
     p = stats.norm.sf(abs(z))
     return z,p
 
-def plot_odds_ratios_for_sites_groups(outfile,hpm_rates_dict, animals=['oct','bim','sep','squ','bob','lin']):
-    
-    data = []
-    columns = ('Species','syn_neural','syn_neural_err','div_neural','div_neural_err','syn_non_neural','syn_non_neural_err','div_non_neural','div_non_neural_err',)
-    
-    p_vals = {}
-    odds_ratios = {}
-    
-    for a in animals:
-        a1 = hpm_rates_dict['neural']['strong'].loc[animals_names_dict[a],'div_edited']
-        a2 = hpm_rates_dict['neural']['strong'].loc[animals_names_dict[a],'div']
-        b1 = hpm_rates_dict['neural']['strong'].loc[animals_names_dict[a],'syn_edited']
-        b2 = hpm_rates_dict['neural']['strong'].loc[animals_names_dict[a],'syn']
-        c1 = hpm_rates_dict['non_neural']['strong'].loc[animals_names_dict[a],'div_edited']
-        c2 = hpm_rates_dict['non_neural']['strong'].loc[animals_names_dict[a],'div']
-        d1 = hpm_rates_dict['non_neural']['strong'].loc[animals_names_dict[a],'syn_edited']
-        d2 = hpm_rates_dict['non_neural']['strong'].loc[animals_names_dict[a],'syn']
-        z,p = calculates_odds_ratios_z_score(a1,a2,b1,b2,c1,c2,d1,d2)
-        
-        syn_neural = float(b1)/b2
-        div_neural = float(a1)/a2
-        syn_non_neural = float(d1)/d2
-        div_non_neural = float(c1)/c2
-        
-        syn_neural_err = np.sqrt(syn_neural*(1-syn_neural)/b2)
-        div_neural_err = np.sqrt(div_neural*(1-div_neural)/a2)
-        syn_non_neural_err = np.sqrt(syn_non_neural*(1-syn_non_neural)/d2)
-        div_non_neural_err = np.sqrt(div_non_neural*(1-div_non_neural)/c2)
-        
-        data.append(([animals_names_dict[a],syn_neural,syn_neural_err,div_neural,div_neural_err,syn_non_neural,syn_non_neural_err,div_non_neural,div_non_neural_err]))
-        
-        odds_ratios.update({animals_names_dict[a]:(div_neural/syn_neural, div_non_neural/syn_non_neural)})
-        p_vals.update({animals_names_dict[a]:pval_str(p)})
-        
-    df = pd.DataFrame(data=data,columns=columns)
-    df.set_index('Species',inplace=True)
-    
-    
-    max_y = max(list(df['syn_neural'])+list(df['div_neural'])+list(df['syn_non_neural'])+list(df['div_non_neural']))        
-    pdax = pd.concat([df.syn_neural.rename('syn-neural'), df.div_neural.rename('div-neural'), df.syn_non_neural.rename('syn-non neural'),df.div_non_neural.rename('div-non neural')], axis=1).plot(kind='bar', yerr=(df['syn_neural_err'].values,df['div_neural_err'].values,df['syn_non_neural_err'].values,df['div_non_neural_err'].values), error_kw=dict(lw=1, capsize=2, capthick=1), color=['grey','red','lightgrey','lightsalmon'])
-    ticks = pdax.get_xticks()
-    labels = pdax.get_xticklabels()
-    plt.xticks(rotation=0)
-    plt.title('Diversifying and Synonymous Sites\nin Neural and Non-Neural Genes'+'\n\n', fontsize=17)
-    plt.ylabel('Fraction of sites edited', fontsize=17)
-    plt.xlabel('Species', fontsize=17)
-    plt.tick_params(axis='x', which='both', length=0, labelsize=13)
-    plt.tick_params(axis='y', which='both', labelsize=15)
-    plt.ylim([0,max_y*1.3])
-    plt.gcf().set_size_inches(10,7)
-    pdax.legend(ncol=4,fontsize=13,bbox_to_anchor=(1.01, 1.1))
-    for i,t in enumerate(ticks):
-        plt.plot([t-0.35,t+0.4],[max_y*1.2,max_y*1.2],color = 'black')
-        plt.plot([t-0.35,t-0.35],[max_y*1.2,max_y*1.18],color = 'black')
-        plt.plot([t+0.4,t+0.4],[max_y*1.2,max_y*1.18],color = 'black')
-        ps=p_vals[labels[i].get_text()]
-        if ps=='ns':
-            align=-0.1
-        else:
-            align=-0.25
-        plt.text(t+align,max_y*1.22,ps,size=10)
-        
-        plt.plot([t-0.32,t+0],[max_y*1.1,max_y*1.1],color = 'black')
-        plt.plot([t-0.32,t-0.32],[max_y*1.1,max_y*1.08],color = 'black')
-        plt.plot([t+0,t+0],[max_y*1.1,max_y*1.08],color = 'black')
-        dnds=str(round_siginficant(odds_ratios[labels[i].get_text()][0]))
-        if float(dnds)>=1:
-            align=-0.25
-        else:
-            align=-0.29
-        plt.text(t+align,max_y*1.12,dnds,size=10)
-
-        plt.plot([t+0.06,t+0.38],[max_y*1.1,max_y*1.1],color = 'black')
-        plt.plot([t+0.38,t+0.38],[max_y*1.1,max_y*1.08],color = 'black')
-        plt.plot([t+0.06,t+0.06],[max_y*1.1,max_y*1.08],color = 'black')
-        dnds=str(round_siginficant(odds_ratios[labels[i].get_text()][1]))
-        if float(dnds)>=1:
-            align=0.1
-        else:
-            align=0.08
-        plt.text(t+align,max_y*1.12,dnds,size=10)
-        
-    plt.savefig(outfile)
-    plt.close()
-        
 
 def mutations_rates_tests(path):
     dfs_list = []
@@ -1606,79 +1470,94 @@ def mutations_rates_tests(path):
     df_all['p_val'] = df_all.apply(lambda row: stats.fisher_exact([[row['edited'],row['edited_mutations']],[row['unedited'],row['unedited_mutations']]])[1],axis=1)
     df_all.to_excel(path+'mutations_tests_results.xlsx',index=False)
    
-    
 
-
-
-
-def dnds_odds_ratio_analysis(df1,df2, name1='neural',name2='non_neural'):
-    
-    
-    df1['dnds'] = df1.apply(lambda row: float(row['nonsyn_mutated'])*row['syn_nucl']/(row['nonsyn_nucl']*float(row['syn_mutated'])), axis=1)
-    df2['dnds'] = df2.apply(lambda row: float(row['nonsyn_mutated'])*row['syn_nucl']/(row['nonsyn_nucl']*float(row['syn_mutated'])), axis=1)
-   
-    merged_df = df1.merge(df2,suffixes=('_'+name1,'_'+name2),left_index=True,right_index=True)
-    
-    merged_df['Z'] = merged_df.apply(lambda row: calculates_odds_ratios_z_score(row['nonsyn_mutated_neural'],row['nonsyn_nucl_neural'],row['syn_mutated_neural'],row['syn_nucl_neural'],row['nonsyn_mutated_non_neural'],row['nonsyn_nucl_non_neural'],row['syn_mutated_non_neural'],row['syn_nucl_non_neural'])[0], axis=1)
-    merged_df['pval'] = merged_df.apply(lambda row: calculates_odds_ratios_z_score(row['nonsyn_mutated_neural'],row['nonsyn_nucl_neural'],row['syn_mutated_neural'],row['syn_nucl_neural'],row['nonsyn_mutated_non_neural'],row['nonsyn_nucl_non_neural'],row['syn_mutated_non_neural'],row['syn_nucl_non_neural'])[1], axis=1)
-    
-    
 
 if __name__=='__main__':
     
-    animals_names_dict={'sep':'S.ofi',
-                        'squ':'D.pea',
-                        'bim':'O.bim',
-                        'oct':'O.vul',
-                        'bob':'Eup',
-                        'lin':'S.lin',
-                        'apl':'Apl',
-                        'nau':'Nau',
-                        'bim_oct':'O.vul-O.bim',
-                        'sep_squ':'D.pea-S.ofi',
-                        'lin_sep':'S.ofi-S.lin',
-                        'bob_lin':'Eup-S.lin',
-                        'bob_lin_sep':'S.ofi-S.lin-Eup',
-                        'bob_lin_sep_squ':'Decapodiformes',
-                        'bim_bob_lin_oct_sep_squ':'Coleoids',
-                        'N0':'Mollusca',
-                        'N1':'C0',
-                        'C':'C1',
-                        'D':'D',
-                        'B':'B',
-                        'S':'S',
-                        'O':'O',
-                        'S0':'S0',
-                        'S1':'S1'}
 
-         
-    edited_leaves_groups = [
-                        [('sep','bim','bob'),('sep','bim','lin'),('sep','oct','bob'),('sep','oct','lin'),('squ','bim','bob'),('squ','bim','lin'),('squ','oct','bob'),('squ','oct','lin')],
-                        [('sep','bim','bob'),('sep','bim','lin'),('sep','oct','bob'),('sep','oct','lin'),('squ','bim','bob'),('squ','bim','lin'),('squ','oct','bob'),('squ','oct','lin')],
-                        [('sep','squ','bob'),('sep','squ','lin'),('sep','bob','lin'),('squ','bob','lin')],
-                        [('sep','squ','bob'),('sep','squ','lin'),('sep','bob','lin'),('squ','bob','lin')],
-                        [('sep','oct'),('sep','bim'),('squ','oct'),('squ','bim'),('bob','oct'),('bob','bim'),('lin','oct'),('lin','bim')],
-                        [('sep','oct'),('sep','bim'),('squ','oct'),('squ','bim'),('bob','oct'),('bob','bim'),('lin','oct'),('lin','bim')],
-                        [('sep','oct'),('sep','bim'),('squ','oct'),('squ','bim'),('bob','oct'),('bob','bim'),('lin','oct'),('lin','bim'),('sep','bob'),('sep','lin'),('squ','bob'),('squ','lin')],
-                        [('sep','oct'),('sep','bim'),('squ','oct'),('squ','bim'),('bob','oct'),('bob','bim'),('lin','oct'),('lin','bim'),('sep','bob'),('sep','lin'),('squ','bob'),('squ','lin')],
-                        [('sep','bob'),('sep','lin'),('squ','bob'),('squ','lin')],
-                        [('sep','bob'),('sep','lin'),('squ','bob'),('squ','lin')]
-                        ]
     
+# =============================================================================
+#     animals=['oct','bim','sep','squ','bob','lin']
+#     conserved_groups = ['bim_oct','sep_squ','bob_lin','bob_lin_sep_squ','bim_bob_lin_oct_sep_squ']
+#     path = 'D:/RNA_Editing_large_files_Backup_20201205/Phylogeny/results/Raxml/all8/hpm_cephalopods_ancestry/'    
+#     rates_df, el_df = collect_results_for_hpm_and_plot_probs(path,animals,conserved_groups)      
+#     
+#     animals=['oct','bim','sep','squ','bob','lin']
+#     conserved_groups = ['bim_oct','lin_sep','bob_lin_sep','bob_lin_sep_squ','bim_bob_lin_oct_sep_squ']
+#     path = 'D:/RNA_Editing_large_files_Backup_20201205/Phylogeny/results/NCBI/all8/hpm_cephalopods_ancestry_aa/'    
+#     rates_df, el_df = collect_results_for_hpm_and_plot_probs(path,animals,conserved_groups)  
+# 
+#     animals=['oct','bim','sep','squ','bob','lin']
+#     conserved_groups = ['bim_oct','lin_squ','bob_lin_squ','bob_lin_sep_squ','bim_bob_lin_oct_sep_squ']
+#     path = 'D:/RNA_Editing_large_files_Backup_20201205/Phylogeny/results/oleg/all8/'
+#     rates_df, el_df = collect_results_for_hpm_and_plot_probs(path,animals,conserved_groups)  
+# =============================================================================
     
-    trees={'coleoids_rooted':"((oct,bim)O,((sep,squ)S,(bob,lin)B)D)C",
-           'coleoids_unrooted':"((oct,bim)O,(sep,squ)S,(bob,lin)B)C",
-           'all8_rooted':"(apl,(nau,((oct,bim)O,((sep,squ)S,(bob,lin)B)D)C)N1)N0",
-           'all8_unrooted':"(apl,nau,((oct,bim)O,((sep,squ)S,(bob,lin)B)D)C)N0",
-           'no_boblin_rooted':"(apl,(nau,((oct,bim)O,(sep,squ)S)C)N1)N0",
-           'no_boblin_unrooted':"(apl,nau,((oct,bim)O,(sep,squ)S)C)N0"}
+    path = 'D:/RNA_Editing_large_files_Backup_20201205/Phylogeny/results/oleg/coleoids_adaptive/'
+    results_dfs_dict = collect_results_for_general_model_and_plot_probs(path, recalc=True)
     
-    
-    neural_path = 'C:/Users/shosh/OneDrive/Desktop/RNA_Editing_large_files_Backup_20200906/Phylogeny/results/Sanchez/dnds_analysis/dnds_neural'
-    non_neural_path = 'C:/Users/shosh/OneDrive/Desktop/RNA_Editing_large_files_Backup_20200906/Phylogeny/results/Sanchez/dnds_analysis/dnds_non_neural'
+    # path = 'D:/RNA_Editing_large_files_Backup_20201205/Phylogeny/results/NCBI/coleoids/new_res/'
+    # results_dfs_dict = collect_results_for_general_model_and_plot_probs(path, recalc=True)
 
-    df1 = pd.read_csv(neural_path,sep='\t',index_col=0)
-    df2 = pd.read_csv(non_neural_path,sep='\t',index_col=0)
+    # path = 'D:/RNA_Editing_large_files_Backup_20201205/Phylogeny/results/Raxml/coleoids/new_res_adaptive/'
+    # results_dfs_dict = collect_results_for_general_model_and_plot_probs(path, recalc=True)
+
+
+    # trinity_files_path='D:/RNA_Editing_large_files_Backup_20201205/transcriptomes_fix/trinity_transcriptomes/our_fix/native_coding_mrna/'
+    # animals=['apl','nau','oct', 'bim', 'sep', 'squ', 'lin', 'bob']
+    # print('Reading all transcripts from fasta files')
+    # trinity_dict = {}
+    # for a in animals:
+    #     trinity_df = read_fasta_to_df(trinity_files_path+'native_coding_mrna_orfs_'+a+'.fa')
+    #     trinity_df.set_index('id', inplace=True)
+    #     trinity_dict.update({a:trinity_df})
+        
+    
+    # print('Reading sites file')
+    # sites_path = 'D:/RNA_Editing_large_files_Backup_20201205/Phylogeny/results/Raxml/coleoids/edited_rows_coleoids'
+    # sites_df = pd.read_csv(sites_path,sep='\t',index_col=False)
+    # conserved_sets=[('oct',),('bim',),('sep',),('squ',),('bob',),('lin',),
+    #                 ('oct','bim'),('sep','squ','bob','lin'),
+    #                 ('oct','bim','sep','squ','bob','lin')]
+    # outpath= '/'.join(sites_path.split('/')[:-1])+'/codons_dists/'
+    # if not os.path.exists(outpath):
+    #     os.makedirs(outpath)
+    
+    # codons_dists_res={}
+    # for s in conserved_sets:
+    #     print('Calculating codons distributions for '+str(s))
+    #     codons_dists_res.update({s:codons_dist_dict(sites_df,trinity_dict,s,aa_instead=False)})
+
+    # dists={}
+    # for k,v in codons_dists_res.items():
+    #     print('Creating full table for '+str(k))
+    #     title='_'.join(k)
+    #     mm_df=mismatches_dist(outpath, v, title)
+    #     mm_df['editing']=mm_df.apply(lambda row: row['codon']+';'+str(row['nucl']),axis=1)
+    #     mm_df.set_index('editing', inplace=True)
+    #     dists.update({k:mm_df})
+    
+    # animals=['oct', 'bim', 'sep', 'squ', 'lin', 'bob']
+    # print('merging tables for '+str(animals))
+    # df_final=dists[(animals[0],)]
+    # df_final.rename(columns={animals[0]+'_events':animals_names_dict[animals[0]]}, inplace=True)
+    # for a in animals[1:]:
+    #     df_final[animals_names_dict[a]]=dists[(a,)][a+'_events']
+    # df_final.to_excel(outpath+'edited_codons.xlsx', index=False)
+    # title='edited_codons_dist'
+    # plot_mm_dist_for_multiple_animals(df_final,outpath,title,[animals_names_dict[a] for a in animals])
+    
+    
+    
+    
+        
+        
+# =============================================================================
+#     neural_path = 'C:/Users/shosh/OneDrive/Desktop/RNA_Editing_large_files_Backup_20200906/Phylogeny/results/Sanchez/dnds_analysis/dnds_neural'
+#     non_neural_path = 'C:/Users/shosh/OneDrive/Desktop/RNA_Editing_large_files_Backup_20200906/Phylogeny/results/Sanchez/dnds_analysis/dnds_non_neural'
+#     df1 = pd.read_csv(neural_path,sep='\t',index_col=0)
+#     df2 = pd.read_csv(non_neural_path,sep='\t',index_col=0)
+# =============================================================================
     
     
 # =============================================================================
@@ -1694,7 +1573,6 @@ if __name__=='__main__':
 #     animals=list(df.animal.values)
 #     df.set_index('animal', inplace=True)
 #     
-#     
 #     rates=[]
 #     errs=[]
 #     for a in animals:
@@ -1703,7 +1581,6 @@ if __name__=='__main__':
 #         nonsyn_r = float(df.loc[a,'nonsyn_sites'])/float(df.loc[a,'nonsyn_a'])
 #         syn_err = np.sqrt(syn_r*(1-syn_r)/df.loc[a,'syn_a'])
 #         nonsyn_err = np.sqrt(nonsyn_r*(1-nonsyn_r)/df.loc[a,'nonsyn_a'])
-#         
 #         rates.append((syn_r,nonsyn_r))
 #         errs.append((syn_err,nonsyn_err))
 #         
@@ -1712,7 +1589,6 @@ if __name__=='__main__':
 # =============================================================================
     
     
-        
 # =============================================================================
 #     trinity_files_path='C:/Users/shosh/OneDrive/Desktop/RNA_Editing_large_files_Backup_20200906/transcriptomes_fix/trinity_transcriptomes/our_fix/new_native_transcriptomes/'
 #     animals=['apl','nau','oct', 'bim', 'sep', 'squ', 'lin', 'bob']
@@ -1780,19 +1656,26 @@ if __name__=='__main__':
     
     
 # =============================================================================
-#     # path = 'E:/RNA_editing_Large_files/Phylogeny/results/all8/edited_rows_all8'
-#     # path = 'C:/Users/shosh/OneDrive/Desktop/RNA_Editing_large_files_Backup_20200906/Phylogeny/results/NCBI/all8/all_edited_rows'
-#     # path = 'C:/Users/shosh/OneDrive/Desktop/RNA_Editing_large_files_Backup_20200906/Phylogeny/results/Sanchez/neural/neural_edited_rows_all8'
-#     # path = 'C:/Users/shosh/OneDrive/Desktop/RNA_Editing_large_files_Backup_20200906/Phylogeny/results/Sanchez/non_neural/4fold/edited_rows_from_4fold_non_neural_subset'
-#     # df = pd.read_csv(path,sep='\t',index_col=False)
-#     
+#     # params_groups = [
+#     #                  ('C',([0,0.1],[0.1,1],[0,1]),[('sep','oct'),('sep','bim'),('squ','oct'),('squ','bim'),('bob','oct'),('bob','bim'),('lin','oct'),('lin','bim')],['sep','squ','bob','lin','oct','bim'],'all8_rooted',
+#     #                  'C:/Users/shosh/OneDrive/Desktop/RNA_Editing_large_files_Backup_20200906/Phylogeny/results/Sanchez/non_neural/4fold/edited_rows_from_4fold_non_neural_subset','non_neural'),
+#     #                  ('C',([0,0.1],[0.1,1],[0,1]),[('sep','oct'),('sep','bim'),('squ','oct'),('squ','bim'),('bob','oct'),('bob','bim'),('lin','oct'),('lin','bim')],['sep','squ','bob','lin','oct','bim'],'all8_rooted',
+#     #                  'C:/Users/shosh/OneDrive/Desktop/RNA_Editing_large_files_Backup_20200906/Phylogeny/results/Sanchez/neural/4fold/edited_rows_from_4fold_neural_subset','neural')
+#                      
+#     #                  ]
+# 
 #     params_groups = [
-#                      ('C',([0,0.1],[0.1,1],[0,1]),[('sep','oct'),('sep','bim'),('squ','oct'),('squ','bim'),('bob','oct'),('bob','bim'),('lin','oct'),('lin','bim')],['sep','squ','bob','lin','oct','bim'],'all8_rooted',
-#                       'C:/Users/shosh/OneDrive/Desktop/RNA_Editing_large_files_Backup_20200906/Phylogeny/results/Sanchez/non_neural/4fold/edited_rows_from_4fold_non_neural_subset','non_neural'),
-#                      ('C',([0,0.1],[0.1,1],[0,1]),[('sep','oct'),('sep','bim'),('squ','oct'),('squ','bim'),('bob','oct'),('bob','bim'),('lin','oct'),('lin','bim')],['sep','squ','bob','lin','oct','bim'],'all8_rooted',
-#                       'C:/Users/shosh/OneDrive/Desktop/RNA_Editing_large_files_Backup_20200906/Phylogeny/results/Sanchez/neural/4fold/edited_rows_from_4fold_neural_subset','neural')
+#                      ('C',([0,0.1],[0.1,1],[0,1]),[('sep','oct'),('sep','bim'),('squ','oct'),('squ','bim'),('bob','oct'),('bob','bim'),('lin','oct'),('lin','bim')],['sep','squ','bob','lin','oct','bim'],'all8_rooted_ncbi',
+#                       'D:/RNA_Editing_large_files_Backup_20201205/Phylogeny/results/Raxml/all8/edited_rows','raxml'),
+#         
+#                      ('C',([0,0.1],[0.1,1],[0,1]),[('sep','oct'),('sep','bim'),('squ','oct'),('squ','bim'),('bob','oct'),('bob','bim'),('lin','oct'),('lin','bim')],['sep','squ','bob','lin','oct','bim'],'all8_rooted_oleg',
+#                      'D:/RNA_Editing_large_files_Backup_20201205/Phylogeny/results/NCBI/all8/edited_rows','oleg'),
+#                      
+#                      ('C',([0,0.1],[0.1,1],[0,1]),[('sep','oct'),('sep','bim'),('squ','oct'),('squ','bim'),('bob','oct'),('bob','bim'),('lin','oct'),('lin','bim')],['sep','squ','bob','lin','oct','bim'],'all8_rooted_ncbi',
+#                       'D:/RNA_Editing_large_files_Backup_20201205/Phylogeny/results/oleg/all8/edited_rows','ncbi')
 #                      ]
 # 
+#     
 #     results = []
 #     conserved_sites_subs_dict = {}
 #     for param in params_groups:
@@ -1812,14 +1695,13 @@ if __name__=='__main__':
 #         print(str(len(relevant_es[relevant_es['N1_nuc']=='G'])) + ' N1 ancestralG')
 #         print(str(len(relevant_es[relevant_es['N1_nuc']=='C'])) + ' N1 ancestralC')
 #         print(str(len(relevant_es[relevant_es['N1_nuc']=='T'])) + ' N1 ancestralT')
-# #        sites_df, rates,data_df = calc_substitutions_per_ancestral_nucl(relevant_es,levels_ranges,intermediate,animals_to_check_subs,count_subs_multiple_times=False)
+#         sites_df, rates,data_df = calc_substitutions_per_ancestral_nucl(relevant_es,levels_ranges,intermediate,animals_to_check_subs,count_subs_multiple_times=False)
 #         sites_df, rates, data_df = calc_substitutions_per_editing_type(relevant_es,levels_ranges,intermediate,animals_to_check_subs,count_subs_multiple_times=False)
 #         
 #         results.append(rates)
 #         outpath = '/'.join(path.split('/')[:-1])+'/'
 #         name = 'subs_from_'+intermediate
 #         data_df.to_excel(path+name+'.xlsx', index=False)
-# #        plot_subs_rates(rates,name,outpath)
 #         plot_substitutions_by_type(outpath,rates[2][1])
 #         conserved_sites_subs_dict.update({params_name:data_df})
 # =============================================================================
@@ -1855,62 +1737,7 @@ if __name__=='__main__':
 #     non_syn=len(conserved_4_coleoidsGsubs[conserved_4_coleoidsGsubs['editing_type']!='syn'])/len(conserved_4_coleoids_same_prots[conserved_4_coleoids_same_prots['editing_type']!='syn'])
 #     plot_conserved_sites_substitutions(path,[syn,div,non_syn])
 # =============================================================================
-    
-    
-    
-# =============================================================================
-#     general_model_dict = {}
-#     # path = 'E:/RNA_editing_Large_files/Phylogeny/results/coleoids/our_model/rooted/all_sites/'    
-#     # path = 'E:/RNA_editing_Large_files/Phylogeny/results/all8/our_model/ances_G_rooted/'
-#     # path = 'E:/RNA_editing_Large_files/Phylogeny/results/all8/our_model/ances_A_rooted/'
-#     # path = 'C:/Users/shosh/OneDrive/Desktop/results/coleoids/our_model/rooted/conserved_sites/'
-#     # path = 'E:/RNA_editing_Large_files/Phylogeny/results/NCBI/coleoids/our_model/'
-#     # path = 'C:/Users/shosh/OneDrive/Desktop/RNA_Editing_large_files_Backup_20200906/Phylogeny/results/Sanchez/neural/coleoids_our_model/'
-#     path = 'C:/Users/shosh/OneDrive/Desktop/RNA_Editing_large_files_Backup_20200906/Phylogeny/results/Sanchez/non_neural/4fold/coleoids_adaptive_model/'    
-#     results_dfs_dict = collect_results_for_general_model_and_plot_probs(path)
-#     general_model_dict.update({'non_neural':results_dfs_dict})
-#     
-#     path = 'C:/Users/shosh/OneDrive/Desktop/RNA_Editing_large_files_Backup_20200906/Phylogeny/results/Sanchez/neural/4fold/coleoids_adaptive_model/'    
-#     results_dfs_dict = collect_results_for_general_model_and_plot_probs(path)
-#     general_model_dict.update({'neural':results_dfs_dict})
-# =============================================================================
-    
-    
-# =============================================================================
-#     # hpm_rates_dict = {}
-#     # animals=['oct','bim','sep','squ','bob','lin']
-#     # conserved_groups = ['bim_oct','sep_squ','bob_lin','bob_lin_sep_squ','bim_bob_lin_oct_sep_squ']
-#     # animals=['oct','bim','sep','squ','bob','lin']
-#     # conserved_groups = ['bim_oct','lin_sep','bob_lin_sep','bob_lin_sep_squ','bim_bob_lin_oct_sep_squ'
-#     # animals=['oct','bim','sep','squ']
-#     # conserved_groups = ['bim_oct','sep_squ','bim_oct_sep_squ']
-#     # path = 'E:/RNA_editing_Large_files/Phylogeny/results/all8/hpm/'
-#     # path = 'E:/RNA_editing_Large_files/Phylogeny/results/all8/hpm_cephalopods_ancestry/'
-#     # path = 'C:/Users/shosh/OneDrive/Desktop/all8_ncbi/'
-#     # path = 'C:/Users/shosh/OneDrive/Desktop/RNA_Editing_large_files_Backup_20200906/Phylogeny/results/Sanchez/all8/hpm_cephalopods_ancestry/'
-#     # path = 'C:/Users/shosh/OneDrive/Desktop/RNA_Editing_large_files_Backup_20200906/Phylogeny/results/Sanchez/neural/all8_hpm/'
-# 
-#     animals=['oct','bim','sep','squ','bob','lin']
-#     conserved_groups = ['bim_oct','sep_squ','bob_lin','bob_lin_sep_squ','bim_bob_lin_oct_sep_squ']
-#     path = 'C:/Users/shosh/OneDrive/Desktop/RNA_Editing_large_files_Backup_20200906/Phylogeny/results/Sanchez/all8/hpm_cephalopods_ancestry/'    
-#     rates_df, el_df = collect_results_for_hpm_and_plot_probs(path,animals,conserved_groups)      
-#     
-#     animals=['oct','bim','sep','squ','bob','lin']
-#     conserved_groups = ['bim_oct','lin_sep','bob_lin_sep','bob_lin_sep_squ','bim_bob_lin_oct_sep_squ']
-#     path = 'C:/Users/shosh/OneDrive/Desktop/RNA_Editing_large_files_Backup_20200906/Phylogeny/results/NCBI/all8/hpm_cephalopods_ancestry_aa/'    
-#     rates_df, el_df = collect_results_for_hpm_and_plot_probs(path,animals,conserved_groups)      
-#     
-#     # hpm_rates_dict = {}
-#     # animals=['oct','bim','sep','squ','bob','lin']
-#     # conserved_groups = ['bim_oct','sep_squ','bob_lin','bob_lin_sep_squ','bim_bob_lin_oct_sep_squ']
-#     # path = 'C:/Users/shosh/OneDrive/Desktop/RNA_Editing_large_files_Backup_20200906/Phylogeny/results/Sanchez/non_neural/4fold/all8_hpm/'
-#     # rates_df, el_df = collect_results_for_hpm_and_plot_probs(path,animals,conserved_groups)      
-#     # hpm_rates_dict.update({'non_neural':rates_df})
-#     
-#     # path = 'C:/Users/shosh/OneDrive/Desktop/RNA_Editing_large_files_Backup_20200906/Phylogeny/results/Sanchez/neural/4fold/all8_hpm/'
-#     # rates_df, el_df = collect_results_for_hpm_and_plot_probs(path,animals,conserved_groups)      
-#     # hpm_rates_dict.update({'neural':rates_df})
-# =============================================================================
+      
 
     
 # =============================================================================
@@ -1977,17 +1804,9 @@ if __name__=='__main__':
 # =============================================================================
     
     
-# =============================================================================
-#     n=0
-#     for i in range(len(model0)):
-#         if model0[i]!=model1[i]:
-#             n+=1
-#     print(n)
-#     print(n/len(model0))
-# =============================================================================
-
 
 # =============================================================================
+#     # General transctiprom and editing sites data tables
 #     animals = ['apl','nau','oct', 'bim', 'sep', 'squ', 'bob', 'lin']
 #     edited_animals = ['oct', 'bim', 'sep', 'squ', 'bob', 'lin']
 #     transcripts_path = 'E:/RNA_editing_Large_files/transcriptomes_fix/trinity_transcriptomes/our_fix/new_native_transcriptomes/'
@@ -2001,15 +1820,13 @@ if __name__=='__main__':
 #     
 #     for a in animals:
 #         
-#         trinity_df = read_trinity_mrna_files(transcripts_path+'new_native_orfs_'+a+'.fa')
-#         
+#         trinity_df = read_trinity_mrna_files(transcripts_path+'new_native_orfs_'+a+'.fa')    
 #         trinity_df['length'] = trinity_df.apply(lambda row: row['orfs_end']-row['orfs_start'],axis=1)
 #         orfs_n = len(trinity_df)
 #         unique_prot = len(set(list(trinity_df['protein'].values)))
 #         mean_l = np.mean(trinity_df['length'].values)
 #         median_l = np.median(trinity_df['length'].values)
-#         total_l = sum(trinity_df['length'].values)
-#         
+#         total_l = sum(trinity_df['length'].values)    
 #         orfs_data.append((animals_names_dict[a],orfs_n,unique_prot,mean_l,median_l,total_l))
 #         
 #         if a in edited_animals:
@@ -2026,85 +1843,4 @@ if __name__=='__main__':
 #     orfs_data_df = pd.DataFrame(data=orfs_data,columns=orfs_columns)
 #     orfs_data_df.to_excel(outpath+'orfs_data.xlsx',index=False)
 # =============================================================================
-    
-# =============================================================================
-#     print('comparison of syn-div sites odds ratios (div_neural_rate/syn_neural_rate ?= div_non_neural_rate/syn_non_neural_rate):')
-#     for a in animals:
-#         a1 = hpm_rates_dict['neural']['strong'].loc[animals_names_dict[a],'div_edited']
-#         a2 = hpm_rates_dict['neural']['strong'].loc[animals_names_dict[a],'div']
-#         b1 = hpm_rates_dict['neural']['strong'].loc[animals_names_dict[a],'syn_edited']
-#         b2 = hpm_rates_dict['neural']['strong'].loc[animals_names_dict[a],'syn']
-#         c1 = hpm_rates_dict['non_neural']['strong'].loc[animals_names_dict[a],'div_edited']
-#         c2 = hpm_rates_dict['non_neural']['strong'].loc[animals_names_dict[a],'div']
-#         d1 = hpm_rates_dict['non_neural']['strong'].loc[animals_names_dict[a],'syn_edited']
-#         d2 = hpm_rates_dict['non_neural']['strong'].loc[animals_names_dict[a],'syn']
-#         z,p = calculates_odds_ratios_z_score(a1,a2,b1,b2,c1,c2,d1,d2)
-#         print(a+': z='+str(round(z,3))+', p='+str(round(p,3)), ' neural '+str(round((a1/a2)/(b1/b2),4))+' nonneural '+str(round((c1/c2)/(d1/d2),4)))
-# =============================================================================
-    
-# =============================================================================
-#     print('comparison of syn-res sites odds ratios (res_neural_rate/syn_neural_rate ?= res_non_neural_rate/syn_non_neural_rate):')
-#     for a in animals:
-#         a1 = hpm_rates_dict['neural']['strong'].loc[animals_names_dict[a],'res_edited']
-#         a2 = hpm_rates_dict['neural']['strong'].loc[animals_names_dict[a],'res']
-#         b1 = hpm_rates_dict['neural']['strong'].loc[animals_names_dict[a],'syn_edited']
-#         b2 = hpm_rates_dict['neural']['strong'].loc[animals_names_dict[a],'syn']
-#         c1 = hpm_rates_dict['non_neural']['strong'].loc[animals_names_dict[a],'res_edited']
-#         c2 = hpm_rates_dict['non_neural']['strong'].loc[animals_names_dict[a],'res']
-#         d1 = hpm_rates_dict['non_neural']['strong'].loc[animals_names_dict[a],'syn_edited']
-#         d2 = hpm_rates_dict['non_neural']['strong'].loc[animals_names_dict[a],'syn']
-#         z,p = calculates_odds_ratios_z_score(a1,a2,b1,b2,c1,c2,d1,d2)
-#         print(a+': z='+str(round(z,3))+', p='+str(round(p,3)))
-# =============================================================================
-        
-# =============================================================================
-#         
-#     print('comparison of C sites substitutions per type in neural/non_neural genes (chi^2):')
-#     for t in ['syn','div']:
-#         neural_subs = conserved_sites_subs_dict['neural'].loc[2,t+'_subs']
-#         neural_sites = conserved_sites_subs_dict['neural'].loc[2,t]
-#         non_neural_subs = conserved_sites_subs_dict['non_neural'].loc[2,t+'_subs']
-#         non_neural_sites = conserved_sites_subs_dict['non_neural'].loc[2,t]
-#         chi,p = stats.fisher_exact([[neural_subs,neural_sites],[non_neural_subs,non_neural_sites]])
-#         print(t+': chi='+str(round(chi,3))+', p='+str(round(p,3)))
-# =============================================================================
-        
-    
-# =============================================================================
-#     print('comparison sites mutations to background mutations odds ratios in neural/non_neural genes:')
-#     for n in ['D','S','B']:
-#         if n=='D':
-#             animals = ['sep', 'squ', 'bob', 'lin']
-#         elif n=='S':
-#             animals = ['sep', 'squ']
-#         elif n=='B':
-#             animals = ['bob', 'lin']
-#             
-#         for a in animals:
-#             index = 'ancesNone_C_'+n+'_'+a+'_iden0.3_in_range10_liberal_average_strong_lower0.1_weak_upper0.05'
-#             a1 = general_model_dict['neural']['iden0.3_range10'].loc[index,'actual_nonsyn_eg_mutations']
-#             a2 = general_model_dict['neural']['iden0.3_range10'].loc[index,'strong_non_syn_sites']
-#             b1 = general_model_dict['neural']['iden0.3_range10'].loc[index,'non_syn_ag_mut_in_leaf']-a1
-#             b2 = general_model_dict['neural']['iden0.3_range10'].loc[index,'intermediate_non_syn_a']-a2
-#             c1 = general_model_dict['non_neural']['iden0.3_range10'].loc[index,'actual_nonsyn_eg_mutations']
-#             c2 = general_model_dict['non_neural']['iden0.3_range10'].loc[index,'strong_non_syn_sites']
-#             d1 = general_model_dict['non_neural']['iden0.3_range10'].loc[index,'non_syn_ag_mut_in_leaf']-c1
-#             d2 = general_model_dict['non_neural']['iden0.3_range10'].loc[index,'intermediate_non_syn_a']-c2
-#             z,p = calculates_odds_ratios_z_score(a1,a2,b1,b2,c1,c2,d1,d2)
-#             print('C->'+n+'->'+a+': z='+str(round(z,3))+', p='+str(round(p,3)), ' neural '+str(round((a1/a2)/(b1/b2),4))+' nonneural '+str(round((c1/c2)/(d1/d2),4)))
-# =============================================================================
-    
-    
-    
 
-    
-    
-        
-        
-        
-        
-        
-        
-        
-        
-        

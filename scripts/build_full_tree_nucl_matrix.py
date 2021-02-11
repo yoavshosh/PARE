@@ -28,7 +28,7 @@ all_mm = ['AC','AG','AT','CA','CG','CT','GA','GC','GT','TA','TC','TG']
 
 def natural_sort(l): 
     convert = lambda text: int(text) if text.isdigit() else text.lower() 
-    alphanum_key = lambda key: [ convert(c) for c in re.split('([0-9]+)', key) ] 
+    alphanum_key = lambda key: [convert(c) for c in re.split('([0-9]+)', key)] 
     return sorted(l, key = alphanum_key)
 
 
@@ -41,8 +41,7 @@ def read_trinity_mrna_files(trinity_file):
     
     for record in SeqIO.parse(open(trinity_file, "r"), "fasta"):
         rec_data = record.description.split('\t')
-        if rec_data[0][-1] == ' ':  #some fastafiles have spaces after each id, so fixing it here.
-            rec_data[0] = rec_data[0].replace(' ','')
+        rec_data[0] = rec_data[0].rstrip()  #some fastafiles have spaces after each id, so fixing it here.
         protein = rec_data[-1].split('|')[2].split(' ')[0]   #reading proteing from description assuming it was added to header using the transcriptome built pipeline we have for trinity
         rec_data = (rec_data[0],protein,protein.split('_')[0],int(rec_data[2]),int(rec_data[4]),rec_data[6],record.seq)
         data.append(rec_data)

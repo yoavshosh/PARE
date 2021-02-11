@@ -10,38 +10,47 @@ import sys
 import pandas as pd
 import numpy as np
 from functools import reduce
-from scipy import stats
+from scipy import stats, optimize
 from Bio import Phylo
-
+import argparse
 
 try:
     from StringIO import StringIO ## for Python 2
 except ImportError:
     from io import StringIO ## for Python 3
     
+    
+trees={'coleoids_rooted_raxml':"((oct,bim)O,((sep,squ)S,(bob,lin)B)D)C",
+       'coleoids_unrooted_raxml':"((oct,bim)O,(sep,squ)S,(bob,lin)B)C",
+       'all8_rooted_raxml':"(apl,(nau,((oct,bim)O,((sep,squ)S,(bob,lin)B)D)C)N1)N0",
+       'all8_unrooted_raxml':"(apl,nau,((oct,bim)O,((sep,squ)S,(bob,lin)B)D)C)N0",
+       'all8_rooted_ncbi':"(apl,(nau,((oct,bim)O,(squ,(bob,(sep,lin)S1)S0)D)C)N1)N0",   
+       'coleoids_rooted_ncbi':"((oct,bim)O,(squ,(bob,(sep,lin)S1)S0)D)C",
+       'all8_rooted_oleg':"(apl,(nau,((oct,bim)O,(sep,(bob,(squ,lin)S1)S0)D)C)N1)N0",
+       'coleoids_rooted_oleg':"((oct,bim)O,(sep,(bob,(squ,lin)S1)S0)D)C"}
 
 
 class Hypothesis:
     
     filter_types_for_suffix_dict = {'id':[str,tuple],
-                            'length':int,
-                            'pos_base_0':[int,tuple,list],
-                            'animals':[int,tuple,list],
-                            'protein':[str,tuple],
-                            'edited':[int,tuple,list],
-                            'coding_location':[int,tuple,list],
-                            'nuc':[str,tuple],
-                            'site_key':[str,tuple],
-                            'editing_level':list,
-                            'distance_to_nearest_recoding_site':list,
-                            'strongest_in_gene':int,
-                            'range_100_cluster':[str,tuple],
-                            'strongest_in_range_100_cluster':int,
-                            'original_aa':[str,tuple],
-                            'recoding':int,
-                            'target_aa':[str,tuple],
-                            'nuc_prob':list,
-                            'nucl_range':list}
+                                    'length':int,
+                                    'pos_base_0':[int,tuple,list],
+                                    'animals':[int,tuple,list],
+                                    'protein':[str,tuple],
+                                    'edited':[int,tuple,list],
+                                    'coding_location':[int,tuple,list],
+                                    'nuc':[str,tuple],
+                                    'site_key':[str,tuple],
+                                    'editing_level':list,
+                                    'distance_to_nearest_recoding_site':list,
+                                    'strongest_in_gene':int,
+                                    'range_100_cluster':[str,tuple],
+                                    'strongest_in_range_100_cluster':int,
+                                    'original_aa':[str,tuple],
+                                    'recoding':int,
+                                    'target_aa':[str,tuple],
+                                    'nuc_prob':list,
+                                    'nucl_range':list}
     
     
     def __init__(self, nucl_mat, filters_dict={},filter_now=True,tree_str=None):
@@ -66,21 +75,21 @@ class Hypothesis:
         self.leaf_nucl = None
         self.rates = {}
         self.sites_in_intermediate_nodes={}
-        self.strict_data = {}
-        self.liberal_data = {}
-        self.no_depletion_data = {}
-        self.mutations_count = {}
-        self.editing_levels_histogram = {}
-        self.mutated_sites_editing_levels_histogram = {}
-        self.editing_sites_by_types = {}
-        self.editing_types_rates = {}
-        self.editing_levels_distribution_by_type = {}
-        self.sites_substitutions = {}
-        self.editing_rates_by_ancestral_state = {}
-        self.editing_levels_distribution_by_ancestral_state = {}
-        self.dnds_dict = {}
+        self.adaptive_model_data = {'adaptive':{},
+                                    'mutations_count':{}}
+        
+        self.hpm_data = {'editing_levels_histogram':{},
+                         'mutated_sites_editing_levels_histogram':{},
+                         'editing_sites_by_types':{},
+                         'editing_types_rates':{},
+                         'editing_levels_distribution_by_type':{},
+                         'sites_substitutions':{},
+                         'editing_rates_by_ancestral_state':{},
+                         'editing_levels_distribution_by_ancestral_state':{},
+                         'dnds_dict':{}}
+    
         self.editing_level_method = None
-        self.General_model = self.create_General_model()
+        self.adaptive_model = self.create_adaptive_model()
         self.HPM = self.create_Harm_permitting_model()
         
         if tree_str is not None:
@@ -130,38 +139,6 @@ class Hypothesis:
     def find_recent_common_ancestor(self, leavs):
         assert (self.tree is not None), "phylogenetic tree is not defined"
         return self.tree.common_ancestor(leavs)
-        
-        
-    def reset_all(self):
-        self.filters_dict= self.original_filters_dict
-        self.nucl_mat=self.original_full_matrix
-        self.edited = None
-        self.mutated_editing_sites = None
-        self.edited_leaves = None
-        self.editing_level_method=None
-        self.ancestor = None
-        self.intermediate = None
-        self.intermediate_nucl = None
-        self.leaf = None
-        self.leaf_nucl = None
-        self.rates = {}
-        self.sites_in_intermediate_nodes={}
-        self.strict_data = {}
-        self.liberal_data = {}
-        self.no_depletion_data = {}
-        self.mutations_count = {}
-        self.editing_levels_histogram = {}
-        self.mutated_sites_editing_levels_histogram = {}
-        self.editing_sites_by_types = {}
-        self.editing_types_rates = {}
-        self.editing_levels_distribution_by_type = {}
-        self.sites_substitutions = {}
-        self.editing_rates_by_ancestral_state = {}
-        self.editing_levels_distribution_by_ancestral_state = {}
-        self.dnds_dict = {}
-        self.editing_level_method = None
-        self.General_model = self.create_General_model()
-        self.HPM = self.create_Harm_permitting_model()
       
         
     def calc_editing_levels_histogram(self, matrix, bin_size=0.05):
@@ -172,8 +149,7 @@ class Hypothesis:
             lower =  upper
         return pd.DataFrame(data = sites, columns=('lower','upper','sites'))
 
-    
-    
+        
     def remove_filters(self):
         self.nucl_mat=self.original_full_matrix
       
@@ -231,8 +207,7 @@ class Hypothesis:
         self.ancestor = ancestral
         self.intermediate = intermediate
         self.leaf = leaf
-        self.calc_mutation_rate(intermediate,intermediate_nucl,leaf,leaf_nucl)
-                
+
         
     def calc_mutation_rate(self,ancestral_nod,ancestral_nod_nucl,end_nod,mutated_end_nod_nucl):
         """
@@ -255,12 +230,9 @@ class Hypothesis:
             mutated_syn = total_syn[total_syn[end_nod+'_nuc']==mutated_end_nod_nucl]
             mutated_non_syn = total_nonsyn[total_nonsyn[end_nod+'_nuc']==mutated_end_nod_nucl]         
             if branch in self.rates:
-                if mm in self.rates[branch]:
-                    self.rates[branch][mm]=(('syn', float(len(mutated_syn)), float(len(mutated_syn))/float(len(total_syn)), float(total_syn)), ('nonsyn', float(len(mutated_non_syn)), float(len(mutated_non_syn))/float(len(total_nonsyn)), float(total_nonsyn)))
-                else:
-                    self.rates[branch].update({mm:(('syn', float(len(mutated_syn)), float(len(mutated_syn))/float(len(total_syn)), float(total_syn)), ('nonsyn', float(len(mutated_non_syn)), float(len(mutated_non_syn))/float(len(total_nonsyn)), float(total_nonsyn)))})
+                self.rates[branch].update({mm:(('syn', float(len(mutated_syn)), float(len(mutated_syn))/float(len(total_syn)), float(len(total_syn))), ('nonsyn', float(len(mutated_non_syn)), float(len(mutated_non_syn))/float(len(total_nonsyn)), float(len(total_nonsyn))))})
             else:
-                self.rates.update({branch:{mm:(('syn', float(len(mutated_syn)), float(len(mutated_syn))/float(len(total_syn)), float(total_syn)), ('nonsyn', float(len(mutated_non_syn)), float(len(mutated_non_syn))/float(len(total_nonsyn)), float(total_nonsyn)))}})
+                self.rates.update({branch:{mm:(('syn', float(len(mutated_syn)), float(len(mutated_syn))/float(len(total_syn)), float(len(total_syn))), ('nonsyn', float(len(mutated_non_syn)), float(len(mutated_non_syn))/float(len(total_nonsyn)), float(len(total_nonsyn))))}})
     
     
     def get_groups_of_edited_and_unedited_sites(self):
@@ -297,16 +269,41 @@ class Hypothesis:
         self.non_edited_leaves = non_edited_leaves
     
     
+    def filter_matrix_with_intermediate_editing_condition(self, edited_leaves = None, nucl='A'):
+        """
+        edited_leaves - a list of tuples. each tuple is a group of animals in which all should be edited
+        filters the nucl_mat for each row to comply to at least one of the tuples in edited_leaves
+        """
+        def in_unification_of_intersections(row, edited_leaves, nucl='A'):
+            in_unified_intersections = 0
+            for group in edited_leaves:
+                if len(group)==sum([1 for a in group if row[a+'_nuc']==nucl]):
+                    in_unified_intersections=1
+            return in_unified_intersections
+        
+        if edited_leaves is None:
+            self.get_groups_of_edited_and_unedited_sites()
+            edited_leaves=self.edited_leaves
+        else:
+            self.edited_leaves = edited_leaves
+        
+        mat = self.nucl_mat.copy()
+        mat['in_unified_intersections'] = mat.apply(lambda row: in_unification_of_intersections(row, edited_leaves, nucl=nucl), axis=1)
+        mat = mat[mat['in_unified_intersections']==1]  
+        self.nucl_mat=mat.copy()
+    
+
     def collect_editing_sites(self, edited_leaves = None, non_edited_leaves=None, editing_level_method='average', bin_size=0.05):
         """
         edited_leaves - a list of tuples. each tuple is a group of animals in which all should be edited
-        returns a data frame in which each row comply to at least one of the tuples in edited_leaves
+        sets a data frame in which each row comply to at least one of the tuples in edited_leaves
         """
         def in_unification_of_intersections(row, edited_leaves,non_edited_leaves):
             in_unified_intersections = 0
             for group in edited_leaves:
                 if len(group)==sum([row[a+'_edited'] for a in group]):
                     in_unified_intersections=1
+                    break
             for leaf in non_edited_leaves:
                 if row[leaf+'_edited']==1:
                     in_unified_intersections=0
@@ -376,7 +373,7 @@ class Hypothesis:
     
     def write_data(self, path, file_name='hypotheses_analysis', data_to_write = ['strict','liberal','no_depletion'], file_type='xlsx', sub_name='sheet1'):
         
-        def write(file_type, data_frame, path, file_name, sub_name='sheet1'):
+        def write(file_type, data_frame, path, file_name, name_sufix=None):
             
             if file_type=='xlsx':
                 if os.path.isfile(path+file_name):
@@ -386,61 +383,40 @@ class Hypothesis:
                     writer.book = book
                 else:
                     writer = pd.ExcelWriter(path+file_name+'.xlsx', engine='xlsxwriter')
-                data_frame.to_excel(writer, sheet_name = sub_name)
+                if name_sufix is None:
+                    name_sufix='sheet1' 
+                data_frame.to_excel(writer, sheet_name = name_sufix)
                 writer.save()
                 writer.close()
             elif file_type=='csv':
-                name=file_name+'_'+sub_name
-                while name[-1]=='_':
-                    name=name[:-1]
-                data_frame.to_csv(path+file_name+'_'+sub_name, sep='\t')
+                if name_sufix is None:
+                    name=file_name
+                else:
+                    name=file_name+'_'+name_sufix
+                data_frame.to_csv(path+name, sep='\t')
+                
              
         for data in data_to_write:
-            if data=='strict':
-                data_frame=pd.concat([s for s in self.strict_data.values()], axis=1, sort=False)    
-                write(file_type, data_frame, path, file_name, sub_name='strict')
-            elif data=='liberal':
-                data_frame=pd.concat([s for s in self.liberal_data.values()], axis=1, sort=False)
-                write(file_type, data_frame, path, file_name, sub_name='liberal') 
-            elif data=='no_depletion':
-                data_frame=pd.concat([s for s in self.no_depletion_data.values()], axis=1, sort=False)
-                write(file_type, data_frame, path, file_name, sub_name='no_depletion') 
-            elif data=='editing_types_count':
-                data_frame=pd.concat([s for s in self.editing_sites_by_types.values()], axis=1, sort=False).transpose()
-                write(file_type, data_frame, path, file_name, sub_name=sub_name)
-            elif data=='editing_types_rates':
-                data_frame=pd.concat([s for s in self.editing_types_rates.values()], axis=1, sort=False).transpose()
-                write(file_type, data_frame, path, file_name, sub_name=sub_name)
-            elif data=='mutations_count':
-                data_frame=pd.concat([s for s in self.mutations_count.values()], axis=1, sort=False).transpose()
-                write(file_type, data_frame, path, file_name, sub_name=sub_name)
-            elif data=='editing_ancestral_rates':
-                data_frame=pd.concat([s for s in self.editing_rates_by_ancestral_state.values()], axis=1, sort=False).transpose()
-                write(file_type, data_frame, path, file_name, sub_name=sub_name)
-            elif data=='dnds':
-                data_frame=pd.concat([s for s in self.dnds_dict.values()], axis=1, sort=False).transpose()
-                write(file_type, data_frame, path, file_name, sub_name=sub_name)
-            
-            elif data=='sites_substitutions':
-                data_frame=pd.concat([s for s in self.sites_substitutions.values()], axis=1, sort=False).transpose()
-                write(file_type, data_frame, path, file_name, sub_name=sub_name)
-            elif data=='editing_levels_by_types':
+            if data=='adaptive':
+                data_frame=pd.concat([s for s in self.adaptive_model_data[data].values()], axis=1, sort=False)    
+                write(file_type, data_frame, path, file_name, name_sufix=data)
+            elif data in ['mutations_count','editing_types_count','editing_types_rates','editing_ancestral_rates','dnds','sites_substitutions',]:
+                if data=='mutations_count':
+                    data_frame=pd.concat([s for s in self.adaptive_model_data[data].values()], axis=1, sort=False).transpose()
+                    write(file_type, data_frame, path, file_name)
+                else:  
+                    data_frame=pd.concat([s for s in self.hpm_data[data].values()], axis=1, sort=False).transpose()
+                    write(file_type, data_frame, path, file_name)
+            elif data in ['editing_levels_distribution_by_type','editing_levels_distribution_by_ancestral_state']:
                 if file_type=='xlsx':
-                    data_frame=pd.concat([s for s in self.editing_levels_distribution_by_type.values()], axis=1, sort=False).transpose()
-                    write(file_type, data_frame, path, file_name, sub_name=sub_name)
+                    data_frame=pd.concat([s for s in self.hpm_data[data].values()], axis=1, sort=False).transpose()
+                    write(file_type, data_frame, path, file_name)
                 elif file_type=='csv':
-                    for k,s in self.editing_levels_distribution_by_type.items():
+                    for k,s in self.hpm_data[data].items():
                         s.to_csv(path+file_name+'_'+k, sep='\t')
-            elif data=='editing_levels_by_ancestral_state':
-                if file_type=='xlsx':
-                    data_frame=pd.concat([s for s in self.editing_levels_distribution_by_ancestral_state.values()], axis=1, sort=False).transpose()
-                    write(file_type, data_frame, path, file_name, sub_name=sub_name)
-                elif file_type=='csv':
-                    for k,s in self.editing_levels_distribution_by_ancestral_state.items():
-                        s.to_csv(path+file_name+'_'+k, sep='\t')
-                            
             
             
+
     def collect_sites_rates_in_intermediate_nodes(self, ancestors,intermediate,editing_level_method='average',editing_levels=[0,0.05],original_nucl='A',target_nucl='G'):
         """
         This function collect all edited sites at intermediate node (generated from ancestor to that that node)
@@ -488,10 +464,10 @@ class Hypothesis:
         
     
         def determine_editing_type_for_multiple_leaves(self, row, leaves, leaf_original_nucl='A', leaf_target_nucl='G', exclude_ancestry=['N0'], ancestor_for_type=None):
+            """
+            For sites shared by multiple leaves, editing type is determined wet to the ancestry of the recent common ancestor of all leaves
+            """
             
-            """
-            for sites shared by multiple leaves, editing type is determined wet to the ancestry of the recent common ancestor of all leaves
-            """
             def determine_type_from_ancestry(row,target_aa,original_aa,ancestry):
                 if target_aa==original_aa:
                     return 'syn'
@@ -530,11 +506,9 @@ class Hypothesis:
             if examined_animals is None:
                 examined_animals = list(set([a for group in leaves_groups for a in group]))
             mat['editing_type'] = mat.apply(lambda row: self.determine_editing_type_for_multiple_leaves(row,examined_animals,ancestor_for_type=ancestor_for_type,leaf_original_nucl=leaf_original_nucl,leaf_target_nucl=leaf_target_nucl), axis=1)
-            
             self.hpm.collect_editing_sites(edited_leaves=leaves_groups,non_edited_leaves=non_edited_leaves,editing_level_method=editing_level_method)
             editing_level_lower_bound = editing_levels[0]
             editing_level_upper_bound = editing_levels[1]
-            
             edited=self.hpm.edited.copy()    
             edited = edited[np.logical_and(edited['combined_editing_level']>editing_level_lower_bound,edited['combined_editing_level']<=editing_level_upper_bound)]
             
@@ -542,7 +516,6 @@ class Hypothesis:
                 edited['has_a_genomic'+leaf_target_nucl] = edited.apply(lambda row: 1 if any([row[a+'_nuc']==leaf_target_nucl for a in examined_animals]) else 0, axis=1)
             else:
                 edited['has_a_genomic'+leaf_target_nucl] = edited.apply(lambda row: sum([1 for a in examined_animals if row[a+'_nuc']==leaf_target_nucl]), axis=1)
-            
             edited_subs = edited[edited['has_a_genomic'+leaf_target_nucl]>0]
                    
             name='conserved_in'
@@ -575,7 +548,7 @@ class Hypothesis:
             nonsyn_unknown_type_p = calc_p_val_fisher_exact(nonsyn_unknown_type_subs,nonsyn_unknown_type,syn_subs,syn)
             tot_nonsyn_p = calc_p_val_fisher_exact(tot_nonsyn_subs,tot_nonsyn,syn_subs,syn)
             
-            self.hpm.sites_substitutions.update({name:pd.Series(data=(ancestor_for_type,leaves_groups,non_edited_leaves,examined_animals,editing_level_lower_bound,editing_level_upper_bound,count_multiple_subs_per_sites,syn_subs,syn,res_subs,res,res_p,div_subs,div,div_p,nonsyn_unknown_type_subs,nonsyn_unknown_type,nonsyn_unknown_type_p,tot_nonsyn_subs,tot_nonsyn,tot_nonsyn_p),
+            self.hpm.hpm_data['sites_substitutions'].update({name:pd.Series(data=(ancestor_for_type,leaves_groups,non_edited_leaves,examined_animals,editing_level_lower_bound,editing_level_upper_bound,count_multiple_subs_per_sites,syn_subs,syn,res_subs,res,res_p,div_subs,div,div_p,nonsyn_unknown_type_subs,nonsyn_unknown_type,nonsyn_unknown_type_p,tot_nonsyn_subs,tot_nonsyn,tot_nonsyn_p),
                                                                 index=('common_ancestor_for_sites_type','edited_groups','non_edited_leaves','subs_in_any_of','editing_level_lower_bound','editing_level_upper_bound','multiple_subs_per_sites','syn_subs','syn','res_subs','res','res_p','div_subs','div','div_p','nonsyn_unknown_type_subs','nonsyn_unknown_type','nonsyn_unknown_type_p','total_nonsyn_subs','total_nonsyn','tot_nonsyn_p'), name=name)})
             
             
@@ -593,24 +566,24 @@ class Hypothesis:
                 self.hpm.collect_editing_sites(edited_leaves=[(leaves,)],non_edited_leaves=[],editing_level_method=editing_level_method)
                 mat=self.hpm.edited.copy()
                 mat[leaves+'_editing_type']=mat.apply(lambda row: self.determine_editing_type(row,ancestors,leaves,leaf_original_nucl=leaf_original_nucl,leaf_target_nucl=leaf_target_nucl),axis=1)
-                self.hpm.editing_levels_distribution_by_type.update({name+'_syn':mat[mat[leaves+'_editing_type']=='syn'][leaves+'_editing_level']})
-                self.hpm.editing_levels_distribution_by_type.update({name+'_res':mat[mat[leaves+'_editing_type']=='res'][leaves+'_editing_level']})
-                self.hpm.editing_levels_distribution_by_type.update({name+'_div':mat[mat[leaves+'_editing_type']=='div'][leaves+'_editing_level']})
-                self.hpm.editing_levels_distribution_by_type.update({name+'_specific_syn':mat[np.logical_and(mat[leaves+'_editing_type']=='syn',mat['edited_animals']==1)][leaves+'_editing_level']})
-                self.hpm.editing_levels_distribution_by_type.update({name+'_specific_res':mat[np.logical_and(mat[leaves+'_editing_type']=='res',mat['edited_animals']==1)][leaves+'_editing_level']})
-                self.hpm.editing_levels_distribution_by_type.update({name+'_specific_div':mat[np.logical_and(mat[leaves+'_editing_type']=='div',mat['edited_animals']==1)][leaves+'_editing_level']})
+                self.hpm.hpm_data['editing_levels_distribution_by_type'].update({name+'_syn':mat[mat[leaves+'_editing_type']=='syn'][leaves+'_editing_level']})
+                self.hpm.hpm_data['editing_levels_distribution_by_type'].update({name+'_res':mat[mat[leaves+'_editing_type']=='res'][leaves+'_editing_level']})
+                self.hpm.hpm_data['editing_levels_distribution_by_type'].update({name+'_div':mat[mat[leaves+'_editing_type']=='div'][leaves+'_editing_level']})
+                self.hpm.hpm_data['editing_levels_distribution_by_type'].update({name+'_specific_syn':mat[np.logical_and(mat[leaves+'_editing_type']=='syn',mat['edited_animals']==1)][leaves+'_editing_level']})
+                self.hpm.hpm_data['editing_levels_distribution_by_type'].update({name+'_specific_res':mat[np.logical_and(mat[leaves+'_editing_type']=='res',mat['edited_animals']==1)][leaves+'_editing_level']})
+                self.hpm.hpm_data['editing_levels_distribution_by_type'].update({name+'_specific_div':mat[np.logical_and(mat[leaves+'_editing_type']=='div',mat['edited_animals']==1)][leaves+'_editing_level']})
                 
             elif type(leaves) in [list,tuple]: 
                 name='_'.join(sorted(leaves))
                 self.hpm.collect_editing_sites(edited_leaves=[leaves],non_edited_leaves=[],editing_level_method=editing_level_method)
                 mat=self.hpm.edited.copy()
                 mat['editing_type'] = mat.apply(lambda row: self.determine_editing_type_for_multiple_leaves(row,leaves,leaf_original_nucl=leaf_original_nucl,leaf_target_nucl=leaf_target_nucl), axis=1)
-                self.hpm.editing_levels_distribution_by_type.update({name+'_syn':mat[mat['editing_type']=='syn']['combined_editing_level']})
-                self.hpm.editing_levels_distribution_by_type.update({name+'_res':mat[mat['editing_type']=='res']['combined_editing_level']})
-                self.hpm.editing_levels_distribution_by_type.update({name+'_div':mat[mat['editing_type']=='div']['combined_editing_level']})
-                self.hpm.editing_levels_distribution_by_type.update({name+'_specific_syn':mat[np.logical_and(mat['editing_type']=='syn',mat['edited_animals']==len(leaves))]['combined_editing_level']})
-                self.hpm.editing_levels_distribution_by_type.update({name+'_specific_res':mat[np.logical_and(mat['editing_type']=='res',mat['edited_animals']==len(leaves))]['combined_editing_level']})
-                self.hpm.editing_levels_distribution_by_type.update({name+'_specific_div':mat[np.logical_and(mat['editing_type']=='div',mat['edited_animals']==len(leaves))]['combined_editing_level']})       
+                self.hpm.hpm_data['editing_levels_distribution_by_type'].update({name+'_syn':mat[mat['editing_type']=='syn']['combined_editing_level']})
+                self.hpm.hpm_data['editing_levels_distribution_by_type'].update({name+'_res':mat[mat['editing_type']=='res']['combined_editing_level']})
+                self.hpm.hpm_data['editing_levels_distribution_by_type'].update({name+'_div':mat[mat['editing_type']=='div']['combined_editing_level']})
+                self.hpm.hpm_data['editing_levels_distribution_by_type'].update({name+'_specific_syn':mat[np.logical_and(mat['editing_type']=='syn',mat['edited_animals']==len(leaves))]['combined_editing_level']})
+                self.hpm.hpm_data['editing_levels_distribution_by_type'].update({name+'_specific_res':mat[np.logical_and(mat['editing_type']=='res',mat['edited_animals']==len(leaves))]['combined_editing_level']})
+                self.hpm.hpm_data['editing_levels_distribution_by_type'].update({name+'_specific_div':mat[np.logical_and(mat['editing_type']=='div',mat['edited_animals']==len(leaves))]['combined_editing_level']})       
             
             
         def calc_editing_types_rates(self, leaves, leaf_original_nucl='A', leaf_target_nucl='G', ancestors=None, editing_levels=[0,1]):
@@ -663,7 +636,7 @@ class Hypothesis:
                 specie_specific_div_edited = len(edited[np.logical_and(edited['editing_type']=='div', edited['edited_animals']==len(leaves))])
                 div = len(mat[mat['editing_type']=='div'])
                 
-            self.hpm.editing_types_rates.update({name:pd.Series(data=(syn_edited,specie_specific_syn_edited,syn,res_edited,specie_specific_res_edited,res,div_edited,specie_specific_div_edited,div),
+            self.hpm.hpm_data['editing_types_rates'].update({name:pd.Series(data=(syn_edited,specie_specific_syn_edited,syn,res_edited,specie_specific_res_edited,res,div_edited,specie_specific_div_edited,div),
                                                                       index=('syn_edited','specie_specific_syn_edited','syn','res_edited','specie_specific_res_edited','res','div_edited','specie_specific_div_edited','div'), name=name)})
             
                  
@@ -701,15 +674,14 @@ class Hypothesis:
                 specie_specific_div_n=len(mat[np.logical_and(mat['editing_type']=='div',mat['edited_animals']==len(leaves))])
 
             
-            self.hpm.editing_sites_by_types.update({name:pd.Series(data=(syn_n,specie_specific_syn_n,res_n,specie_specific_res_n,div_n,specie_specific_div_n),
+            self.hpm.hpm_data['editing_sites_by_types'].update({name:pd.Series(data=(syn_n,specie_specific_syn_n,res_n,specie_specific_res_n,div_n,specie_specific_div_n),
                                                                        index=('synonymous','synonymous_specie_specific','restorative','restorative_specie_specific','diversifying','diversifying_specie_specific'), name=name)})
                 
         
         
         
         def determine_ancestral_state(self, row, ancestors, leaf, leaf_original_nucl='A', leaf_target_nucl='G', exclude_ancestry=['N0']):
-            
-            #count ancestral C\T
+
             ancestors_to_check = [a for a in ancestors if a not in exclude_ancestry]
             if leaf_target_nucl in [row[a+'_nuc'] for a in ancestors_to_check]:
                 return 'res'
@@ -717,9 +689,9 @@ class Hypothesis:
                 return 'div'
             
         def determine_ancestral_state_for_multiple_leaves(self, row, leaves, leaf_original_nucl='A', leaf_target_nucl='G', exclude_ancestry=['N0'], ancestor_for_type=None):
-            
             """
-            for sites shared by multiple leaves, editing type is determined wet to the ancestry of the recent common ancestor of all leaves
+            For sites shared by multiple leaves, 
+            editing type is determined wrt the ancestry of the recent common ancestor of all leaves
             """
             def determine_state_from_ancestry(row,ancestry,target_nucl):
 
@@ -818,7 +790,7 @@ class Hypothesis:
                 
             data=(syn_div,syn_div_edited,syn_div_species_specific_edited,syn_res,syn_res_edited,syn_res_species_specific_edited,nonsyn_div,nonsyn_div_edited,nonsyn_div_species_specific_edited,nonsyn_res,nonsyn_res_edited,nonsyn_res_species_specific_edited)
             index=('syn_div','syn_div_edited','syn_div_species_specific_edited','syn_res','syn_res_edited','syn_res_species_specific_edited','nonsyn_div','nonsyn_div_edited','nonsyn_div_species_specific_edited','nonsyn_res','nonsyn_res_edited','nonsyn_res_species_specific_edited')
-            self.hpm.editing_rates_by_ancestral_state.update({name:pd.Series(data=data,index=index,name=name)})
+            self.hpm.hpm_data['editing_rates_by_ancestral_state'].update({name:pd.Series(data=data,index=index,name=name)})
         
             
         def collect_editing_levels_distributions_by_ancestral_state(self, leaves, leaf_original_nucl='A', leaf_target_nucl='G', ancestors=None, editing_level_method='average'):
@@ -835,14 +807,14 @@ class Hypothesis:
                 mat=self.hpm.edited.copy()
                 mat[leaves+'_editing_type']=mat.apply(lambda row: self.determine_ancestral_state(row,ancestors,leaves,leaf_original_nucl=leaf_original_nucl,leaf_target_nucl=leaf_target_nucl),axis=1)
                 
-                self.hpm.editing_levels_distribution_by_ancestral_state.update({name+'_syn_res':mat[np.logical_and(mat[leaves+'_editing_type']=='res',mat[leaves+'_'+leaf_original_nucl+leaf_target_nucl+'_recoding']==0)][leaves+'_editing_level']})
-                self.hpm.editing_levels_distribution_by_ancestral_state.update({name+'_syn_div':mat[np.logical_and(mat[leaves+'_editing_type']=='div',mat[leaves+'_'+leaf_original_nucl+leaf_target_nucl+'_recoding']==0)][leaves+'_editing_level']})
-                self.hpm.editing_levels_distribution_by_ancestral_state.update({name+'_nonsyn_res':mat[np.logical_and(mat[leaves+'_editing_type']=='res',mat[leaves+'_'+leaf_original_nucl+leaf_target_nucl+'_recoding']==1)][leaves+'_editing_level']})
-                self.hpm.editing_levels_distribution_by_ancestral_state.update({name+'_nonsyn_div':mat[np.logical_and(mat[leaves+'_editing_type']=='div',mat[leaves+'_'+leaf_original_nucl+leaf_target_nucl+'_recoding']==1)][leaves+'_editing_level']})
-                self.hpm.editing_levels_distribution_by_ancestral_state.update({name+'_syn_res_species_specific':mat[np.logical_and(np.logical_and(mat[leaves+'_editing_type']=='res',mat[leaves+'_'+leaf_original_nucl+leaf_target_nucl+'_recoding']==0),mat['edited_animals']==1)][leaves+'_editing_level']})
-                self.hpm.editing_levels_distribution_by_ancestral_state.update({name+'_syn_div_species_specific':mat[np.logical_and(np.logical_and(mat[leaves+'_editing_type']=='div',mat[leaves+'_'+leaf_original_nucl+leaf_target_nucl+'_recoding']==0),mat['edited_animals']==1)][leaves+'_editing_level']})
-                self.hpm.editing_levels_distribution_by_ancestral_state.update({name+'_nonsyn_res_species_specific':mat[np.logical_and(np.logical_and(mat[leaves+'_editing_type']=='res',mat[leaves+'_'+leaf_original_nucl+leaf_target_nucl+'_recoding']==1),mat['edited_animals']==1)][leaves+'_editing_level']})
-                self.hpm.editing_levels_distribution_by_ancestral_state.update({name+'_nonsyn_div_species_specific':mat[np.logical_and(np.logical_and(mat[leaves+'_editing_type']=='div',mat[leaves+'_'+leaf_original_nucl+leaf_target_nucl+'_recoding']==1),mat['edited_animals']==1)][leaves+'_editing_level']})
+                self.hpm.hpm_data['editing_levels_distribution_by_ancestral_state'].update({name+'_syn_res':mat[np.logical_and(mat[leaves+'_editing_type']=='res',mat[leaves+'_'+leaf_original_nucl+leaf_target_nucl+'_recoding']==0)][leaves+'_editing_level']})
+                self.hpm.hpm_data['editing_levels_distribution_by_ancestral_state'].update({name+'_syn_div':mat[np.logical_and(mat[leaves+'_editing_type']=='div',mat[leaves+'_'+leaf_original_nucl+leaf_target_nucl+'_recoding']==0)][leaves+'_editing_level']})
+                self.hpm.hpm_data['editing_levels_distribution_by_ancestral_state'].update({name+'_nonsyn_res':mat[np.logical_and(mat[leaves+'_editing_type']=='res',mat[leaves+'_'+leaf_original_nucl+leaf_target_nucl+'_recoding']==1)][leaves+'_editing_level']})
+                self.hpm.hpm_data['editing_levels_distribution_by_ancestral_state'].update({name+'_nonsyn_div':mat[np.logical_and(mat[leaves+'_editing_type']=='div',mat[leaves+'_'+leaf_original_nucl+leaf_target_nucl+'_recoding']==1)][leaves+'_editing_level']})
+                self.hpm.hpm_data['editing_levels_distribution_by_ancestral_state'].update({name+'_syn_res_species_specific':mat[np.logical_and(np.logical_and(mat[leaves+'_editing_type']=='res',mat[leaves+'_'+leaf_original_nucl+leaf_target_nucl+'_recoding']==0),mat['edited_animals']==1)][leaves+'_editing_level']})
+                self.hpm.hpm_data['editing_levels_distribution_by_ancestral_state'].update({name+'_syn_div_species_specific':mat[np.logical_and(np.logical_and(mat[leaves+'_editing_type']=='div',mat[leaves+'_'+leaf_original_nucl+leaf_target_nucl+'_recoding']==0),mat['edited_animals']==1)][leaves+'_editing_level']})
+                self.hpm.hpm_data['editing_levels_distribution_by_ancestral_state'].update({name+'_nonsyn_res_species_specific':mat[np.logical_and(np.logical_and(mat[leaves+'_editing_type']=='res',mat[leaves+'_'+leaf_original_nucl+leaf_target_nucl+'_recoding']==1),mat['edited_animals']==1)][leaves+'_editing_level']})
+                self.hpm.hpm_data['editing_levels_distribution_by_ancestral_state'].update({name+'_nonsyn_div_species_specific':mat[np.logical_and(np.logical_and(mat[leaves+'_editing_type']=='div',mat[leaves+'_'+leaf_original_nucl+leaf_target_nucl+'_recoding']==1),mat['edited_animals']==1)][leaves+'_editing_level']})
                 
                 
             elif type(leaves) in [list,tuple]: 
@@ -853,14 +825,14 @@ class Hypothesis:
                 
                 common_ancestor = self.hpm.tree.common_ancestor(leaves).name
             
-                self.hpm.editing_levels_distribution_by_ancestral_state.update({name+'_syn_res':mat[np.logical_and(mat['editing_type']=='res',mat[common_ancestor+'_'+leaf_original_nucl+leaf_target_nucl+'_recoding']==0)]['combined_editing_level']})
-                self.hpm.editing_levels_distribution_by_ancestral_state.update({name+'_syn_div':mat[np.logical_and(mat['editing_type']=='div',mat[common_ancestor+'_'+leaf_original_nucl+leaf_target_nucl+'_recoding']==0)]['combined_editing_level']})
-                self.hpm.editing_levels_distribution_by_ancestral_state.update({name+'_nonsyn_res':mat[np.logical_and(mat['editing_type']=='res',mat[common_ancestor+'_'+leaf_original_nucl+leaf_target_nucl+'_recoding']==1)]['combined_editing_level']})
-                self.hpm.editing_levels_distribution_by_ancestral_state.update({name+'_nonsyn_div':mat[np.logical_and(mat['editing_type']=='div',mat[common_ancestor+'_'+leaf_original_nucl+leaf_target_nucl+'_recoding']==1)]['combined_editing_level']})
-                self.hpm.editing_levels_distribution_by_ancestral_state.update({name+'_syn_res_species_specific':mat[np.logical_and(np.logical_and(mat['editing_type']=='res',mat[common_ancestor+'_'+leaf_original_nucl+leaf_target_nucl+'_recoding']==0),mat['edited_animals']==len(leaves))]['combined_editing_level']})
-                self.hpm.editing_levels_distribution_by_ancestral_state.update({name+'_syn_div_species_specific':mat[np.logical_and(np.logical_and(mat['editing_type']=='div',mat[common_ancestor+'_'+leaf_original_nucl+leaf_target_nucl+'_recoding']==0),mat['edited_animals']==len(leaves))]['combined_editing_level']})
-                self.hpm.editing_levels_distribution_by_ancestral_state.update({name+'_nonsyn_res_species_specific':mat[np.logical_and(np.logical_and(mat['editing_type']=='res',mat[common_ancestor+'_'+leaf_original_nucl+leaf_target_nucl+'_recoding']==1),mat['edited_animals']==len(leaves))]['combined_editing_level']})
-                self.hpm.editing_levels_distribution_by_ancestral_state.update({name+'_nonsyn_div_species_specific':mat[np.logical_and(np.logical_and(mat['editing_type']=='div',mat[common_ancestor+'_'+leaf_original_nucl+leaf_target_nucl+'_recoding']==1),mat['edited_animals']==len(leaves))]['combined_editing_level']})
+                self.hpm.hpm_data['editing_levels_distribution_by_ancestral_state'].update({name+'_syn_res':mat[np.logical_and(mat['editing_type']=='res',mat[common_ancestor+'_'+leaf_original_nucl+leaf_target_nucl+'_recoding']==0)]['combined_editing_level']})
+                self.hpm.hpm_data['editing_levels_distribution_by_ancestral_state'].update({name+'_syn_div':mat[np.logical_and(mat['editing_type']=='div',mat[common_ancestor+'_'+leaf_original_nucl+leaf_target_nucl+'_recoding']==0)]['combined_editing_level']})
+                self.hpm.hpm_data['editing_levels_distribution_by_ancestral_state'].update({name+'_nonsyn_res':mat[np.logical_and(mat['editing_type']=='res',mat[common_ancestor+'_'+leaf_original_nucl+leaf_target_nucl+'_recoding']==1)]['combined_editing_level']})
+                self.hpm.hpm_data['editing_levels_distribution_by_ancestral_state'].update({name+'_nonsyn_div':mat[np.logical_and(mat['editing_type']=='div',mat[common_ancestor+'_'+leaf_original_nucl+leaf_target_nucl+'_recoding']==1)]['combined_editing_level']})
+                self.hpm.hpm_data['editing_levels_distribution_by_ancestral_state'].update({name+'_syn_res_species_specific':mat[np.logical_and(np.logical_and(mat['editing_type']=='res',mat[common_ancestor+'_'+leaf_original_nucl+leaf_target_nucl+'_recoding']==0),mat['edited_animals']==len(leaves))]['combined_editing_level']})
+                self.hpm.hpm_data['editing_levels_distribution_by_ancestral_state'].update({name+'_syn_div_species_specific':mat[np.logical_and(np.logical_and(mat['editing_type']=='div',mat[common_ancestor+'_'+leaf_original_nucl+leaf_target_nucl+'_recoding']==0),mat['edited_animals']==len(leaves))]['combined_editing_level']})
+                self.hpm.hpm_data['editing_levels_distribution_by_ancestral_state'].update({name+'_nonsyn_res_species_specific':mat[np.logical_and(np.logical_and(mat['editing_type']=='res',mat[common_ancestor+'_'+leaf_original_nucl+leaf_target_nucl+'_recoding']==1),mat['edited_animals']==len(leaves))]['combined_editing_level']})
+                self.hpm.hpm_data['editing_levels_distribution_by_ancestral_state'].update({name+'_nonsyn_div_species_specific':mat[np.logical_and(np.logical_and(mat['editing_type']=='div',mat[common_ancestor+'_'+leaf_original_nucl+leaf_target_nucl+'_recoding']==1),mat['edited_animals']==len(leaves))]['combined_editing_level']})
                 
                 
         def calc_dnds_to_leaves(self, ancestor, ancestor_nucl, leaves_nucl, leaves=['oct','bim','sep','squ','bob','lin']):
@@ -895,240 +867,28 @@ class Hypothesis:
             data = (syn_nucl,nonsyn_nucl,syn_mutated,nonsyn_mutated)
             index = ('syn_nucl','nonsyn_nucl','syn_mutated','nonsyn_mutated')
             
-            self.hpm.dnds_dict.update({name:pd.Series(data=data,index=index,name=name)})
+            self.hpm.hpm_data['dnds_dict'].update({name:pd.Series(data=data,index=index,name=name)})
             
             
         
-    def create_General_model(self):
-        return Hypothesis.General_model(self)
-    class General_model:
+    def create_adaptive_model(self):
+        return Hypothesis.Adaptive_model(self)
+    class Adaptive_model:
         def __init__(self, hypothoesis):
-            self.general_model = hypothoesis
-            
-             
-        def strict(self, ancestor, intermediate, leaf, leaf_nucl, edited_leaves=None, non_edited_leaves=None, editing_level_method='average', strong_levels=[0.1,1], confidence_level=0.95, n_random=1000000, sites_recalculation = True):
+            self.adaptive_model = hypothoesis
+              
         
-            def calc_strict_model_distribuation(syn_a,non_syn_a,syn_ag_mut,strong_syn_sites,strong_non_syn_sites,confidence_level,n):
-    
-                try:
-                    syn_ag_mut_rate = float(syn_ag_mut)/syn_a
-                    p=float(strong_syn_sites)/syn_a
-                    z = 1-(1-confidence_level)/2
-                    
-                    expected_non_syn_sites_dist = []
-                    for i in range(n):
-                        p_rand = np.random.normal(p,z*np.sqrt(p*(1-p)/syn_a))
-                        while p_rand<0:
-                            p_rand = np.random.normal(p,z*np.sqrt(p*(1-p)/syn_a))
-                        lam = non_syn_a*p_rand
-                        expected_non_syn_sites_dist.append(np.random.poisson(lam))
-                    
-                    expected_non_syn_eg_mut_dist = []
-                    for i in range(n):
-                        expected_eg_mut = (strong_non_syn_sites-expected_non_syn_sites_dist[i])*syn_ag_mut_rate
-                        expected_non_syn_eg_mut_dist.append(np.random.poisson(expected_eg_mut))    
-                    
-                    return expected_non_syn_eg_mut_dist
+        def compare_edited_and_unedited_substitution(self, ancestor, intermediate, leaf, intermediate_nucl='A', leaf_nucl='G', syn=True, edited_leaves=None, non_edited_leaves=[],  levels=[0.1,1], editing_level_method='average', sites_recalculation=True, filter_internucl_for_edit_condition=True):
+                            
+            self.adaptive_model.define_nodes(ancestor,intermediate,leaf,intermediate_nucl=intermediate_nucl,leaf_nucl=leaf_nucl)
+            if filter_internucl_for_edit_condition:
+                self.adaptive_model.filter_matrix_with_intermediate_editing_condition(edited_leaves=edited_leaves,nucl=intermediate_nucl)
             
-                except Exception as e:
-                    return str(e)
-            
-            intermediate_nucl='A'
-            self.general_model.define_nodes(ancestor,intermediate,leaf,intermediate_nucl=intermediate_nucl,leaf_nucl=leaf_nucl)
-            if sites_recalculation or (self.general_model.edited is None or self.general_model.mutated_editing_sites is None):
-                self.general_model.collect_editing_sites(edited_leaves=edited_leaves,non_edited_leaves=non_edited_leaves,editing_level_method=editing_level_method)
-                self.general_model.collect_mutated_editing_sites(leaf, leaf_nucl)
-            
-            intermediate_nucl_mat = self.general_model.nucl_mat[self.general_model.nucl_mat[intermediate+'_nuc']==intermediate_nucl]
-            edited_mat = self.general_model.edited[self.general_model.edited[intermediate+'_nuc']==intermediate_nucl]
-            mutations_mat = self.general_model.mutated_editing_sites[self.general_model.mutated_editing_sites[intermediate+'_nuc']==intermediate_nucl]
-            
-            syn_a = len(intermediate_nucl_mat[intermediate_nucl_mat[intermediate+'_'+intermediate_nucl+leaf_nucl+'_recoding']==0])
-            non_syn_a = len(intermediate_nucl_mat[intermediate_nucl_mat[intermediate+'_'+intermediate_nucl+leaf_nucl+'_recoding']==1])
-            syn_ag_mut = int(self.general_model.rates[intermediate+'_to_'+leaf][intermediate_nucl+leaf_nucl][0][1])
-            non_syn_ag_mut = int(self.general_model.rates[intermediate+'_to_'+leaf][intermediate_nucl+leaf_nucl][1][1])
-            strong_syn_sites = len(edited_mat[np.logical_and(edited_mat[intermediate+'_'+intermediate_nucl+leaf_nucl+'_recoding']==0, np.logical_and(edited_mat['combined_editing_level']>strong_levels[0], edited_mat['combined_editing_level']<=strong_levels[1]))])
-            strong_nonsyn_sites = len(edited_mat[np.logical_and(edited_mat[intermediate+'_'+intermediate_nucl+leaf_nucl+'_recoding']==1, np.logical_and(edited_mat['combined_editing_level']>strong_levels[0], edited_mat['combined_editing_level']<=strong_levels[1]))])
-            actual_strong_nonsyn_eg_mutations = len(mutations_mat[np.logical_and(mutations_mat[intermediate+'_'+intermediate_nucl+leaf_nucl+'_recoding']==1,np.logical_and(mutations_mat['combined_editing_level']>strong_levels[0], mutations_mat['combined_editing_level']<=strong_levels[1]))])
-            
-            syn_sites_creation_rate = float(strong_syn_sites)/float(syn_a)
-            expected_strong_nonsyn_sites = syn_sites_creation_rate*float(non_syn_a)
-            strong_nonsyn_sites_excess = strong_nonsyn_sites-expected_strong_nonsyn_sites
-            expected_nonsyn_EG_mutations = strong_nonsyn_sites_excess*self.general_model.rates[intermediate+'_to_'+leaf]['A'+leaf_nucl][0][1]/float(syn_a)
-            excess_of_unmutated_sites = expected_nonsyn_EG_mutations-actual_strong_nonsyn_eg_mutations
-                      
-            strict_expected_non_syn_eg_mut_dist = calc_strict_model_distribuation(syn_a, non_syn_a, syn_ag_mut, strong_syn_sites, strong_nonsyn_sites, confidence_level, n_random)
-            if type(strict_expected_non_syn_eg_mut_dist)==str:
-                strict_std=strict_expected_non_syn_eg_mut_dist
-                strict_p=strict_expected_non_syn_eg_mut_dist
-            else:
-                strict_std =np.std(strict_expected_non_syn_eg_mut_dist)
-                strict_p = float(sum([1 for j in strict_expected_non_syn_eg_mut_dist if j<actual_strong_nonsyn_eg_mutations]))/float(n_random)
-     
-            self.general_model.strict_data.update({ancestor+'_to_'+intermediate+'_to_'+leaf+'_'+editing_level_method+'_'+str(strong_levels[0]):pd.Series(data = [ancestor,intermediate,leaf,editing_level_method,strong_levels[0],strong_levels[1],syn_a,non_syn_a,syn_ag_mut,non_syn_ag_mut,float(syn_ag_mut)/float(syn_a),float(non_syn_ag_mut)/float(non_syn_a),self.general_model.edited_leaves,self.general_model.non_edited_leaves,strong_syn_sites,strong_nonsyn_sites,expected_strong_nonsyn_sites,strong_nonsyn_sites_excess,expected_nonsyn_EG_mutations,strict_std,actual_strong_nonsyn_eg_mutations,excess_of_unmutated_sites,strict_p],
-                                                                                      index = ['ancestor','intermediate','leaf','combined_editing_level_method','strong_levels_lower_limit','strong_levels_upper_limit','intermediate_syn_a','intermediate_non_syn_a','syn_ag_mut_in_leaf','non_syn_ag_mut_in_leaf','syn_ag_mut_rate','non_syn_ag_mut_rate','groups_of_edited_leaves','non_edited_leaves','strong_syn_sites','strong_non_syn_sites','expected_strong_nonsyn_sites','strong_nonsyn_sites_excess','expected_nonusn_EG_mutations','std','actual_nonsyn_eg_mutations','excess_of_unmutated_sites','p'], name=leaf)})
-        
-        def liberal(self, ancestor, intermediate, leaf, leaf_nucl, edited_leaves=None, non_edited_leaves=None, editing_level_method='average', weak_levels=[0,0.02], strong_levels=[0.1,1], confidence_level=0.95, n_random=1000000, sites_recalculation=True):
-            
-            def calc_liberal_model_distribuation(syn_a,non_syn_a,syn_ag_mut,non_syn_ag_mut,weak_syn_sites,weak_non_syn_sites,strong_syn_sites,strong_non_syn_sites,confidence_level,n):
-                
-                try:
-                    syn_ag_mut_rate = float(syn_ag_mut)/syn_a
-                    non_syn_ag_mut_rate = float(non_syn_ag_mut)/non_syn_a
-                    z = 1-(1-confidence_level)/2
-                    p_weak_nss=float(weak_non_syn_sites)/non_syn_a
-                    p_weak_ss=float(weak_syn_sites)/syn_a
-                    p_strong_ss=float(strong_syn_sites)/syn_a
-                    
-                    expected_non_syn_sites_dist = []
-                    for i in range(n):
-                        p_weak_nss_rand = np.random.normal(p_weak_nss,z*np.sqrt(p_weak_nss*(1-p_weak_nss)/non_syn_a))
-                        while p_weak_nss_rand<0:
-                            p_weak_nss_rand = np.random.normal(p_weak_nss,z*np.sqrt(p_weak_nss*(1-p_weak_nss)/non_syn_a))
-                        p_weak_ss_rand = np.random.normal(p_weak_ss,z*np.sqrt(p_weak_ss*(1-p_weak_ss)/syn_a))
-                        while p_weak_ss_rand<0:
-                            p_weak_ss_rand = np.random.normal(p_weak_ss,z*np.sqrt(p_weak_ss*(1-p_weak_ss)/syn_a))
-                        p_strong_ss_rand = np.random.normal(p_strong_ss,z*np.sqrt(p_strong_ss*(1-p_strong_ss)/syn_a))
-                        while p_strong_ss_rand<0:
-                            p_strong_ss_rand = np.random.normal(p_strong_ss,z*np.sqrt(p_strong_ss*(1-p_strong_ss)/syn_a))
-                        lam = (p_weak_nss_rand/p_weak_ss_rand)*p_strong_ss_rand*non_syn_a
-                        expected_non_syn_sites_dist.append(np.random.poisson(lam))
+            if sites_recalculation or (self.adaptive_model.edited is None):
+                self.adaptive_model.collect_editing_sites(edited_leaves=edited_leaves,non_edited_leaves=non_edited_leaves,editing_level_method=editing_level_method)
                         
-                    expected_non_syn_eg_mut_dist = []
-                    for i in range(n):
-                        expected_eg_mut_from_excess = (strong_non_syn_sites-expected_non_syn_sites_dist[i])*syn_ag_mut_rate
-                        p_non_syn_ag_mut_rate_rand = np.random.normal(non_syn_ag_mut_rate,z*np.sqrt(non_syn_ag_mut_rate*(1-non_syn_ag_mut_rate)/non_syn_a))
-                        expected_eg_mut_from_expected_nss = expected_non_syn_sites_dist[i]*p_non_syn_ag_mut_rate_rand
-                        expected_non_syn_eg_mut_dist.append(np.random.poisson(expected_eg_mut_from_excess)+np.random.poisson(expected_eg_mut_from_expected_nss))
-                        
-                    return expected_non_syn_eg_mut_dist
-                
-                except Exception as e:
-                    return str(e)
-
-            
-            intermediate_nucl='A'
-            self.general_model.define_nodes(ancestor,intermediate,leaf,intermediate_nucl=intermediate_nucl,leaf_nucl=leaf_nucl)
-            if sites_recalculation or (self.general_model.edited is None or self.general_model.mutated_editing_sites is None):
-                self.general_model.collect_editing_sites(edited_leaves=edited_leaves,non_edited_leaves=non_edited_leaves,editing_level_method=editing_level_method)
-                self.general_model.collect_mutated_editing_sites(leaf, leaf_nucl)
-                        
-            intermediate_nucl_mat = self.general_model.nucl_mat[self.general_model.nucl_mat[intermediate+'_nuc']==intermediate_nucl]
-            edited_mat = self.general_model.edited[self.general_model.edited[intermediate+'_nuc']==intermediate_nucl]
-            mutations_mat = self.general_model.mutated_editing_sites[self.general_model.mutated_editing_sites[intermediate+'_nuc']==intermediate_nucl]
-            
-            syn_a = len(intermediate_nucl_mat[intermediate_nucl_mat[intermediate+'_'+intermediate_nucl+leaf_nucl+'_recoding']==0])
-            non_syn_a = len(intermediate_nucl_mat[intermediate_nucl_mat[intermediate+'_'+intermediate_nucl+leaf_nucl+'_recoding']==1])
-            syn_ag_mut = int(self.general_model.rates[intermediate+'_to_'+leaf][intermediate_nucl+leaf_nucl][0][1])
-            non_syn_ag_mut = int(self.general_model.rates[intermediate+'_to_'+leaf][intermediate_nucl+leaf_nucl][1][1])
-            weak_syn_sites = len(edited_mat[np.logical_and(edited_mat[intermediate+'_'+intermediate_nucl+leaf_nucl+'_recoding']==0, np.logical_and(edited_mat['combined_editing_level']>weak_levels[0], edited_mat['combined_editing_level']<=weak_levels[1]))])
-            weak_nonsyn_sites = len(edited_mat[np.logical_and(edited_mat[intermediate+'_'+intermediate_nucl+leaf_nucl+'_recoding']==1, np.logical_and(edited_mat['combined_editing_level']>weak_levels[0], edited_mat['combined_editing_level']<=weak_levels[1]))])
-            strong_syn_sites = len(edited_mat[np.logical_and(edited_mat[intermediate+'_'+intermediate_nucl+leaf_nucl+'_recoding']==0, np.logical_and(edited_mat['combined_editing_level']>strong_levels[0], edited_mat['combined_editing_level']<=strong_levels[1]))])
-            strong_nonsyn_sites = len(edited_mat[np.logical_and(edited_mat[intermediate+'_'+intermediate_nucl+leaf_nucl+'_recoding']==1, np.logical_and(edited_mat['combined_editing_level']>strong_levels[0], edited_mat['combined_editing_level']<=strong_levels[1]))])
-            actual_strong_nonsyn_eg_mutations = len(mutations_mat[np.logical_and(mutations_mat[intermediate+'_'+intermediate_nucl+leaf_nucl+'_recoding']==1,np.logical_and(mutations_mat['combined_editing_level']>strong_levels[0], mutations_mat['combined_editing_level']<=strong_levels[1]))])
-            
-            syn_sites_creation_rate = float(strong_syn_sites)/float(syn_a)
-            non_syn_over_syn_a = float(non_syn_a)/float(syn_a)
-            non_syn_over_syn_weak_sites = float(weak_nonsyn_sites)/float(weak_syn_sites)
-            nonsyn_sites_depletion_factor = non_syn_over_syn_weak_sites/non_syn_over_syn_a
-            expected_strong_nonsyn_sites = nonsyn_sites_depletion_factor*syn_sites_creation_rate*float(non_syn_a)
-            strong_nonsyn_sites_excess = strong_nonsyn_sites-expected_strong_nonsyn_sites
-            expected_nonsyn_EG_mutations_from_excess = strong_nonsyn_sites_excess*self.general_model.rates[intermediate+'_to_'+leaf]['A'+leaf_nucl][0][1]/float(syn_a)
-            expected_nonsyn_EG_mutations_from_expected = expected_strong_nonsyn_sites*self.general_model.rates[intermediate+'_to_'+leaf]['A'+leaf_nucl][1][1]/float(non_syn_a)
-            total_expected_EG_mutations = expected_nonsyn_EG_mutations_from_excess+expected_nonsyn_EG_mutations_from_expected
-            excess_of_unmutated_sites = total_expected_EG_mutations-actual_strong_nonsyn_eg_mutations
-                      
-            liberal_expected_non_syn_eg_mut_dist = calc_liberal_model_distribuation(syn_a,non_syn_a,syn_ag_mut,non_syn_ag_mut,weak_syn_sites,weak_nonsyn_sites,strong_syn_sites,strong_nonsyn_sites,confidence_level,n_random)
-            if type(liberal_expected_non_syn_eg_mut_dist)==str:
-                liberal_std=liberal_expected_non_syn_eg_mut_dist
-                liberal_p=liberal_expected_non_syn_eg_mut_dist
-            else:
-                liberal_std =np.std(liberal_expected_non_syn_eg_mut_dist)
-                liberal_p = float(sum([1 for j in liberal_expected_non_syn_eg_mut_dist if j<actual_strong_nonsyn_eg_mutations]))/float(n_random)
-            
-            self.general_model.liberal_data.update({ancestor+'_to_'+intermediate+'_to_'+leaf+'_'+editing_level_method+'_'+str(weak_levels[1])+'_'+str(strong_levels[0]):pd.Series(data = [ancestor,intermediate,leaf,editing_level_method,strong_levels[0],strong_levels[1],weak_levels[0],weak_levels[1],syn_a,non_syn_a,syn_ag_mut,non_syn_ag_mut,float(syn_ag_mut)/float(syn_a),float(non_syn_ag_mut)/float(non_syn_a),self.general_model.edited_leaves,self.general_model.non_edited_leaves,weak_syn_sites,weak_nonsyn_sites,nonsyn_sites_depletion_factor,strong_syn_sites,strong_nonsyn_sites,expected_strong_nonsyn_sites,strong_nonsyn_sites_excess,expected_nonsyn_EG_mutations_from_excess,expected_nonsyn_EG_mutations_from_expected,total_expected_EG_mutations,liberal_std,actual_strong_nonsyn_eg_mutations,excess_of_unmutated_sites,liberal_p],
-                                                                                       index = ['ancestor','intermediate','leaf','combined_editing_level_method','strong_levels_lower_limit','strong_levels_upper_limit','weak_levels_lower_limit','weak_levels_upper_limit','intermediate_syn_a','intermediate_non_syn_a','syn_ag_mut_in_leaf','non_syn_ag_mut_in_leaf','syn_ag_mut_rate','non_syn_ag_mut_rate','groups_of_edited_leaves','non_edited_leaves','weak_syn_sites','weak_nonsyn_sites','nonsyn_sites_depletion_factor','strong_syn_sites','strong_non_syn_sites','expected_strong_nonsyn_sites','strong_nonsyn_sites_excess','expected_nonsyn_EG_mutations_from_excess','expected_nonsyn_EG_mutations_from_expected','total_expected_EG_mutations','std','actual_nonsyn_eg_mutations','excess_of_unmutated_sites','p'], name=leaf)})
-    
-            
-        def no_depletion_factor(self, ancestor, intermediate, leaf, leaf_nucl, edited_leaves=None, non_edited_leaves=None,  strong_levels=[0.1,1], editing_level_method='average', confidence_level=0.95, n_random=1000000, sites_recalculation=True):
-            
-            def calc_no_depletion_factor_model_distribuation(syn_a,non_syn_a,syn_ag_mut,non_syn_ag_mut,strong_syn_sites,strong_non_syn_sites,confidence_level,n):
-                
-                try:
-                    syn_ag_mut_rate = float(syn_ag_mut)/syn_a
-                    non_syn_ag_mut_rate = float(non_syn_ag_mut)/non_syn_a
-                    z = 1-(1-confidence_level)/2
-                    p_strong_ss=float(strong_syn_sites)/syn_a
-                    
-                    expected_non_syn_sites_dist = []
-                    for i in range(n):
-                        p_strong_ss_rand = np.random.normal(p_strong_ss,z*np.sqrt(p_strong_ss*(1-p_strong_ss)/syn_a))
-                        while p_strong_ss_rand<0:
-                            p_strong_ss_rand = np.random.normal(p_strong_ss,z*np.sqrt(p_strong_ss*(1-p_strong_ss)/syn_a))
-                        lam = p_strong_ss_rand*non_syn_a
-                        expected_non_syn_sites_dist.append(np.random.poisson(lam))
-                        
-                    expected_non_syn_eg_mut_dist = []
-                    for i in range(n):
-                        expected_eg_mut_from_excess = (strong_non_syn_sites-expected_non_syn_sites_dist[i])*syn_ag_mut_rate
-                        p_non_syn_ag_mut_rate_rand = np.random.normal(non_syn_ag_mut_rate,z*np.sqrt(non_syn_ag_mut_rate*(1-non_syn_ag_mut_rate)/non_syn_a))
-                        expected_eg_mut_from_expected_nss = expected_non_syn_sites_dist[i]*p_non_syn_ag_mut_rate_rand
-                        expected_non_syn_eg_mut_dist.append(np.random.poisson(expected_eg_mut_from_excess)+np.random.poisson(expected_eg_mut_from_expected_nss))
-                        
-                    return expected_non_syn_eg_mut_dist
-                
-                except Exception as e:
-                    return str(e)
-
-            
-            intermediate_nucl='A'
-            self.general_model.define_nodes(ancestor,intermediate,leaf,intermediate_nucl=intermediate_nucl,leaf_nucl=leaf_nucl)
-            if sites_recalculation or (self.general_model.edited is None or self.general_model.mutated_editing_sites is None):
-                self.general_model.collect_editing_sites(edited_leaves=edited_leaves,non_edited_leaves=non_edited_leaves,editing_level_method=editing_level_method)
-                self.general_model.collect_mutated_editing_sites(leaf, leaf_nucl)
-                        
-            intermediate_nucl_mat = self.general_model.nucl_mat[self.general_model.nucl_mat[intermediate+'_nuc']==intermediate_nucl]
-            edited_mat = self.general_model.edited[self.general_model.edited[intermediate+'_nuc']==intermediate_nucl]
-            mutations_mat = self.general_model.mutated_editing_sites[self.general_model.mutated_editing_sites[intermediate+'_nuc']==intermediate_nucl]
-            
-            syn_a = len(intermediate_nucl_mat[intermediate_nucl_mat[intermediate+'_'+intermediate_nucl+leaf_nucl+'_recoding']==0])
-            non_syn_a = len(intermediate_nucl_mat[intermediate_nucl_mat[intermediate+'_'+intermediate_nucl+leaf_nucl+'_recoding']==1])
-            syn_ag_mut = int(self.general_model.rates[intermediate+'_to_'+leaf][intermediate_nucl+leaf_nucl][0][1])
-            non_syn_ag_mut = int(self.general_model.rates[intermediate+'_to_'+leaf][intermediate_nucl+leaf_nucl][1][1])
-            strong_syn_sites = len(edited_mat[np.logical_and(edited_mat[intermediate+'_'+intermediate_nucl+leaf_nucl+'_recoding']==0, np.logical_and(edited_mat['combined_editing_level']>strong_levels[0], edited_mat['combined_editing_level']<=strong_levels[1]))])
-            strong_nonsyn_sites = len(edited_mat[np.logical_and(edited_mat[intermediate+'_'+intermediate_nucl+leaf_nucl+'_recoding']==1, np.logical_and(edited_mat['combined_editing_level']>strong_levels[0], edited_mat['combined_editing_level']<=strong_levels[1]))])
-            
-            actual_strong_nonsyn_eg_mutations = len(mutations_mat[np.logical_and(mutations_mat[intermediate+'_'+intermediate_nucl+leaf_nucl+'_recoding']==1,np.logical_and(mutations_mat['combined_editing_level']>strong_levels[0], mutations_mat['combined_editing_level']<=strong_levels[1]))])
-            
-            syn_sites_creation_rate = float(strong_syn_sites)/float(syn_a)
-            expected_strong_nonsyn_sites = syn_sites_creation_rate*float(non_syn_a)
-            strong_nonsyn_sites_excess = strong_nonsyn_sites-expected_strong_nonsyn_sites
-            expected_nonsyn_EG_mutations_from_excess = strong_nonsyn_sites_excess*self.general_model.rates[intermediate+'_to_'+leaf]['A'+leaf_nucl][0][1]/float(syn_a)
-            expected_nonsyn_EG_mutations_from_expected = expected_strong_nonsyn_sites*self.general_model.rates[intermediate+'_to_'+leaf]['A'+leaf_nucl][1][1]/float(non_syn_a)
-            total_expected_EG_mutations = expected_nonsyn_EG_mutations_from_excess+expected_nonsyn_EG_mutations_from_expected
-            excess_of_unmutated_sites = total_expected_EG_mutations-actual_strong_nonsyn_eg_mutations
-                      
-            liberal_expected_non_syn_eg_mut_dist = calc_no_depletion_factor_model_distribuation(syn_a,non_syn_a,syn_ag_mut,non_syn_ag_mut,strong_syn_sites,strong_nonsyn_sites,confidence_level,n_random)
-            if type(liberal_expected_non_syn_eg_mut_dist)==str:
-                liberal_std=liberal_expected_non_syn_eg_mut_dist
-                liberal_p=liberal_expected_non_syn_eg_mut_dist
-            else:
-                liberal_std =np.std(liberal_expected_non_syn_eg_mut_dist)
-                liberal_p = float(sum([1 for j in liberal_expected_non_syn_eg_mut_dist if j<actual_strong_nonsyn_eg_mutations]))/float(n_random)
-            
-            self.general_model.no_depletion_data.update({ancestor+'_to_'+intermediate+'_to_'+leaf+'_'+editing_level_method+'_'+str(strong_levels[0]):pd.Series(data = [ancestor,intermediate,leaf,editing_level_method,strong_levels[0],strong_levels[1],syn_a,non_syn_a,syn_ag_mut,non_syn_ag_mut,float(syn_ag_mut)/float(syn_a),float(non_syn_ag_mut)/float(non_syn_a),self.general_model.edited_leaves,self.general_model.non_edited_leaves,strong_syn_sites,strong_nonsyn_sites,expected_strong_nonsyn_sites,strong_nonsyn_sites_excess,expected_nonsyn_EG_mutations_from_excess,expected_nonsyn_EG_mutations_from_expected,total_expected_EG_mutations,liberal_std,actual_strong_nonsyn_eg_mutations,excess_of_unmutated_sites,liberal_p],
-                                                                                       index = ['ancestor','intermediate','leaf','combined_editing_level_method','strong_levels_lower_limit','strong_levels_upper_limit','intermediate_syn_a','intermediate_non_syn_a','syn_ag_mut_in_leaf','non_syn_ag_mut_in_leaf','syn_ag_mut_rate','non_syn_ag_mut_rate','groups_of_edited_leaves','non_edited_leaves','strong_syn_sites','strong_non_syn_sites','expected_strong_nonsyn_sites','strong_nonsyn_sites_excess','expected_nonsyn_EG_mutations_from_excess','expected_nonsyn_EG_mutations_from_expected','total_expected_EG_mutations','std','actual_nonsyn_eg_mutations','excess_of_unmutated_sites','p'], name=leaf)})
-       
-        
-        def compare_edited_and_unedited_substitution(self, ancestor, intermediate, leaf, intermediate_nucl='A', leaf_nucl='G', syn=True, edited_leaves=None, non_edited_leaves=[],  levels=[0.1,1], editing_level_method='average', sites_recalculation=True):
-            
-           
-            self.general_model.define_nodes(ancestor,intermediate,leaf,intermediate_nucl=intermediate_nucl,leaf_nucl=leaf_nucl)
-            if sites_recalculation or (self.general_model.edited is None):
-                self.general_model.collect_editing_sites(edited_leaves=edited_leaves,non_edited_leaves=non_edited_leaves,editing_level_method=editing_level_method)
-                        
-            intermediate_mat = self.general_model.nucl_mat[self.general_model.nucl_mat[intermediate+'_nuc']==intermediate_nucl].copy()
-            edited = self.general_model.edited[self.general_model.edited[intermediate+'_nuc']==intermediate_nucl].copy()
+            intermediate_mat = self.adaptive_model.nucl_mat[self.adaptive_model.nucl_mat[intermediate+'_nuc']==intermediate_nucl].copy()
+            edited = self.adaptive_model.edited[self.adaptive_model.edited[intermediate+'_nuc']==intermediate_nucl].copy()
             unedited = intermediate_mat[~intermediate_mat.index.isin(list(edited.index))]
             edited = edited[np.logical_and(edited['combined_editing_level']>levels[0], edited['combined_editing_level']<=levels[1])]
             
@@ -1156,75 +916,267 @@ class Hypothesis:
             
             
             
-            self.general_model.mutations_count.update({name:pd.Series(data = [ancestor,intermediate,leaf,mismatch,recoding,editing_level_method,levels[0],levels[1],self.general_model.edited_leaves,self.general_model.non_edited_leaves,edited_n,edited_mutations_n,unedited_n,unedited_mutations_n],
+            self.adaptive_model.adaptive_model_data['mutations_count'].update({name:pd.Series(data = [ancestor,intermediate,leaf,mismatch,recoding,editing_level_method,levels[0],levels[1],self.adaptive_model.edited_leaves,self.adaptive_model.non_edited_leaves,edited_n,edited_mutations_n,unedited_n,unedited_mutations_n],
                                                                       index = ['ancestor','intermediate','leaf','mismatch','type','editing_level_method','editing_level_lower_bound','editing_level_upper_bound','edited_leaves','unedited_leaves','edited','edited_mutations','unedited','unedited_mutations'], name=leaf)})
        
         
 
+        def expected_mutations_distribution(self, ancestor, intermediate, leaf, leaf_nucl, 
+                                                 edited_leaves=None, non_edited_leaves=None, editing_level_method='average', 
+                                                 weak_levels=[0,0.02], strong_levels=[0.1,1], confidence_level=1, n_random=1000000, 
+                                                 sites_recalculation=True,filter_internucl_for_edit_condition=True,fix_depletion=None,
+                                                 calc_expected_hp_sites_mutations=True,calc_adaptive_sites_mutations=False,adaptive_rate=0.0,optimize_adaptive_rate=False,percentile=50):
 
+            
+            def observed_and_expected_mut_pdiff(adaptive_rate,expected_mut,excess_mut,adaptive_mut,
+                                               observed_mut,percentile,syn_a,non_syn_a,syn_ag_mut,non_syn_ag_mut,
+                                               weak_syn_sites,weak_non_syn_sites,strong_syn_sites,strong_nonsyn_sites,
+                                               confidence_level,n,fix_depletion,calc_expected_hp_sites_mutations,calc_adaptive_sites_mutations):
+                
+                del(expected_mut[:])
+                del(excess_mut[:])
+                del(adaptive_mut[:])
+                temp_adaptive_sites = strong_nonsyn_sites*float(adaptive_rate)
+                temp_strong_hp_nonsyn_sites = strong_nonsyn_sites-temp_adaptive_sites
+                
+                generate_expected_mutations_distribution(expected_mut,excess_mut,adaptive_mut,
+                                                         syn_a,non_syn_a,syn_ag_mut,non_syn_ag_mut,weak_syn_sites,weak_non_syn_sites,
+                                                         strong_syn_sites,temp_strong_hp_nonsyn_sites,temp_adaptive_sites,confidence_level,
+                                                         n,fix_depletion,calc_expected_hp_sites_mutations,calc_adaptive_sites_mutations)
+            
+                mutations_distribution = [sum(i) for i in zip(expected_mut,excess_mut,adaptive_mut)]
+                expected_mut = np.mean(mutations_distribution)
+                p = float(sum([1 for j in mutations_distribution if j<observed_mut]))/float(n_random)
+                diff = p-float(percentile)/100.0
+                return diff
+                
+
+            def generate_expected_mutations_distribution(expected_mut,excess_mut,adaptive_mut,
+                                                         syn_a,non_syn_a,syn_ag_mut,non_syn_ag_mut,weak_syn_sites,weak_non_syn_sites,
+                                                         strong_syn_sites,strong_hp_nonsyn_sites,adaptive_sites,confidence_level,
+                                                         n,fix_depletion,calc_expected_hp_sites_mutations,calc_adaptive_sites_mutations):
+                
+                syn_ag_mut_rate = float(syn_ag_mut)/syn_a
+                non_syn_ag_mut_rate = float(non_syn_ag_mut)/non_syn_a
+                z = 1-(1-confidence_level)/2
+                p_weak_nss=float(weak_non_syn_sites)/non_syn_a
+                p_weak_ss=float(weak_syn_sites)/syn_a
+                p_strong_ss=float(strong_syn_sites)/syn_a
+                if fix_depletion is not None:
+                    depletion_factor = fix_depletion
+                
+                expected_non_syn_sites_dist = []
+                for i in range(n):
+                    if fix_depletion is None:
+                        p_weak_nss_rand = np.random.normal(p_weak_nss,z*np.sqrt(p_weak_nss*(1-p_weak_nss)/non_syn_a))
+                        while p_weak_nss_rand<0 or p_weak_nss_rand>1:
+                            p_weak_nss_rand = np.random.normal(p_weak_nss,z*np.sqrt(p_weak_nss*(1-p_weak_nss)/non_syn_a))
+                        p_weak_ss_rand = np.random.normal(p_weak_ss,z*np.sqrt(p_weak_ss*(1-p_weak_ss)/syn_a))
+                        while p_weak_ss_rand<0 or p_weak_nss_rand>1:
+                            p_weak_ss_rand = np.random.normal(p_weak_ss,z*np.sqrt(p_weak_ss*(1-p_weak_ss)/syn_a)) 
+                        depletion_factor=(p_weak_nss_rand/p_weak_ss_rand)
+                    p_strong_ss_rand = np.random.normal(p_strong_ss,z*np.sqrt(p_strong_ss*(1-p_strong_ss)/syn_a))
+                    while p_strong_ss_rand<0 or p_strong_ss_rand>1:
+                        p_strong_ss_rand = np.random.normal(p_strong_ss,z*np.sqrt(p_strong_ss*(1-p_strong_ss)/syn_a))
+                    
+                    lam = depletion_factor*p_strong_ss_rand*non_syn_a
+                    if lam<strong_hp_nonsyn_sites:
+                        expected_non_syn_sites_dist.append(np.random.poisson(lam))
+                    else:
+                        expected_non_syn_sites_dist.append(strong_hp_nonsyn_sites)
+                    
+                for i in range(n):
+                    
+                    #calculate mean of expected mut from expected nonsyn sites, if calculation flag is on, and a mean is within feasible range. if not assume 0 mutations
+                    p_non_syn_ag_mut_rate_rand = np.random.normal(non_syn_ag_mut_rate,z*np.sqrt(non_syn_ag_mut_rate*(1-non_syn_ag_mut_rate)/non_syn_a))
+                    expected_eg_mut_from_expected_nss = expected_non_syn_sites_dist[i]*p_non_syn_ag_mut_rate_rand
+                    if expected_eg_mut_from_expected_nss>0.0 and calc_expected_hp_sites_mutations:
+                        expected_eg_mut_from_expected_nss_rand = np.random.poisson(expected_eg_mut_from_expected_nss)
+                    else:
+                        expected_eg_mut_from_expected_nss_rand=0.0
+                    
+                    #calculate mean of expected mut from excess of nonsyn sites, if mean is within feasible range. if not assume 0 mutations
+                    expected_eg_mut_from_excess = (strong_hp_nonsyn_sites-expected_non_syn_sites_dist[i])*syn_ag_mut_rate
+                    if expected_eg_mut_from_excess>0:
+                        expected_eg_mut_from_excess_rand=np.random.poisson(expected_eg_mut_from_excess)
+                    else:
+                        expected_eg_mut_from_excess_rand=0.0
+                    
+                    #calculate mean of expected mut from adaptive sites, if calculation flag is on, and a mean is within feasible range. if not assume 0 mutations
+                    expected_adptive_sites_mutations = adaptive_sites*p_non_syn_ag_mut_rate_rand
+                    if expected_adptive_sites_mutations>0 and calc_adaptive_sites_mutations:
+                        expected_eg_mut_from_adaptive_rand=np.random.poisson(expected_adptive_sites_mutations)
+                    else:
+                        expected_eg_mut_from_adaptive_rand=0.0
+                        
+                    expected_mut.append(expected_eg_mut_from_expected_nss_rand)
+                    excess_mut.append(expected_eg_mut_from_excess_rand)
+                    adaptive_mut.append(expected_eg_mut_from_adaptive_rand)
+
+                
+            assert 0.0<=adaptive_rate<=1.0, "adaptive rate can not exceed [0,1]"
+            intermediate_nucl='A'
+            self.adaptive_model.define_nodes(ancestor,intermediate,leaf,intermediate_nucl=intermediate_nucl,leaf_nucl=leaf_nucl)
+            if filter_internucl_for_edit_condition:
+                self.adaptive_model.filter_matrix_with_intermediate_editing_condition(edited_leaves=edited_leaves,nucl=intermediate_nucl)
+            self.adaptive_model.calc_mutation_rate(intermediate,intermediate_nucl,leaf,leaf_nucl)
+            
+            if sites_recalculation or (self.adaptive_model.edited is None or self.adaptive_model.mutated_editing_sites is None):
+                self.adaptive_model.collect_editing_sites(edited_leaves=edited_leaves,non_edited_leaves=non_edited_leaves,editing_level_method=editing_level_method)
+                self.adaptive_model.collect_mutated_editing_sites(leaf, leaf_nucl)
+                        
+            intermediate_nucl_mat = self.adaptive_model.nucl_mat[self.adaptive_model.nucl_mat[intermediate+'_nuc']==intermediate_nucl]
+            edited_mat = self.adaptive_model.edited[self.adaptive_model.edited[intermediate+'_nuc']==intermediate_nucl]
+            mutations_mat = self.adaptive_model.mutated_editing_sites[self.adaptive_model.mutated_editing_sites[intermediate+'_nuc']==intermediate_nucl]
+            
+            syn_a = len(intermediate_nucl_mat[intermediate_nucl_mat[intermediate+'_'+intermediate_nucl+leaf_nucl+'_recoding']==0])
+            non_syn_a = len(intermediate_nucl_mat[intermediate_nucl_mat[intermediate+'_'+intermediate_nucl+leaf_nucl+'_recoding']==1])
+            syn_ag_mut = int(self.adaptive_model.rates[intermediate+'_to_'+leaf][intermediate_nucl+leaf_nucl][0][1])
+            non_syn_ag_mut = int(self.adaptive_model.rates[intermediate+'_to_'+leaf][intermediate_nucl+leaf_nucl][1][1])
+            weak_syn_sites = len(edited_mat[np.logical_and(edited_mat[intermediate+'_'+intermediate_nucl+leaf_nucl+'_recoding']==0, np.logical_and(edited_mat['combined_editing_level']>weak_levels[0], edited_mat['combined_editing_level']<=weak_levels[1]))])
+            weak_nonsyn_sites = len(edited_mat[np.logical_and(edited_mat[intermediate+'_'+intermediate_nucl+leaf_nucl+'_recoding']==1, np.logical_and(edited_mat['combined_editing_level']>weak_levels[0], edited_mat['combined_editing_level']<=weak_levels[1]))])
+            strong_syn_sites = len(edited_mat[np.logical_and(edited_mat[intermediate+'_'+intermediate_nucl+leaf_nucl+'_recoding']==0, np.logical_and(edited_mat['combined_editing_level']>strong_levels[0], edited_mat['combined_editing_level']<=strong_levels[1]))])
+            strong_nonsyn_sites = len(edited_mat[np.logical_and(edited_mat[intermediate+'_'+intermediate_nucl+leaf_nucl+'_recoding']==1, np.logical_and(edited_mat['combined_editing_level']>strong_levels[0], edited_mat['combined_editing_level']<=strong_levels[1]))])
+            observed_strong_nonsyn_eg_mutations = len(mutations_mat[np.logical_and(mutations_mat[intermediate+'_'+intermediate_nucl+leaf_nucl+'_recoding']==1,np.logical_and(mutations_mat['combined_editing_level']>strong_levels[0], mutations_mat['combined_editing_level']<=strong_levels[1]))])
+            observed_strong_syn_eg_mutations=len(mutations_mat[np.logical_and(mutations_mat[intermediate+'_'+intermediate_nucl+leaf_nucl+'_recoding']==0,np.logical_and(mutations_mat['combined_editing_level']>strong_levels[0], mutations_mat['combined_editing_level']<=strong_levels[1]))])
+            strong_nonsyn_eg_mutations_rate = float(observed_strong_nonsyn_eg_mutations)/float(strong_nonsyn_sites)
+            strong_syn_eg_mutations_rate = float(observed_strong_syn_eg_mutations)/float(strong_syn_sites)
+                
+            
+            syn_sites_creation_rate = float(strong_syn_sites)/float(syn_a)
+            non_syn_over_syn_a = float(non_syn_a)/float(syn_a)
+            non_syn_over_syn_weak_sites = float(weak_nonsyn_sites)/float(weak_syn_sites)
+            if fix_depletion is None:
+                nonsyn_sites_depletion_factor = non_syn_over_syn_weak_sites/non_syn_over_syn_a
+            else:
+                nonsyn_sites_depletion_factor = fix_depletion
+            
+            #initialize mutations distributions list. those would be filled by either by calling generate_expected_mutations_distribution with passed adaptive_rate or by optimizing for it (distribution would then be the of the last optimization iteration)
+            expected_mut,excess_mut,adaptive_mut = [],[],[] 
+            
+            if optimize_adaptive_rate:  # find adaptive rate that results with the passed percentile of the expected mutations distribution = observed_strong_nonsyn_eg_mutations
+                additional_args = (expected_mut,excess_mut,adaptive_mut,
+                                   observed_strong_nonsyn_eg_mutations,percentile,
+                                   syn_a,non_syn_a,syn_ag_mut,non_syn_ag_mut,
+                                   weak_syn_sites,weak_nonsyn_sites,strong_syn_sites,
+                                   strong_nonsyn_sites,confidence_level,n_random,fix_depletion,
+                                   calc_expected_hp_sites_mutations,calc_adaptive_sites_mutations)
+                
+                opt_adaptive_rate=optimize.bisect(observed_and_expected_mut_pdiff,0,1,args=additional_args)
+                opt_adaptive_sites = float(strong_nonsyn_sites)*opt_adaptive_rate
+                strong_hp_nonsyn_sites = strong_nonsyn_sites-opt_adaptive_sites
+                
+                
+            else: #just calculate the distribution of expected mutations given passed adaptive rate
+                opt_adaptive_rate = adaptive_rate
+                opt_adaptive_sites = float(strong_nonsyn_sites)*opt_adaptive_rate
+                strong_hp_nonsyn_sites = strong_nonsyn_sites-opt_adaptive_sites
+                generate_expected_mutations_distribution(expected_mut,excess_mut,adaptive_mut,
+                                                         syn_a,non_syn_a,syn_ag_mut,non_syn_ag_mut,weak_syn_sites,weak_nonsyn_sites,
+                                                         strong_syn_sites,strong_hp_nonsyn_sites,opt_adaptive_sites,
+                                                         confidence_level,n_random,fix_depletion,calc_expected_hp_sites_mutations,calc_adaptive_sites_mutations)
+            
+
+            expected_hp_strong_nonsyn_sites = min(strong_hp_nonsyn_sites,nonsyn_sites_depletion_factor*syn_sites_creation_rate*float(non_syn_a))
+            strong_nonsyn_sites_excess = max(0.0,strong_hp_nonsyn_sites-expected_hp_strong_nonsyn_sites)
+            expected_nonsyn_EG_mutations_from_excess = np.mean(excess_mut)
+            expected_nonsyn_EG_mutations_from_expected_hp = np.mean(expected_mut)
+            expected_nonsyn_EG_mutations_from_adaptive = np.mean(adaptive_mut)
+            total_expected_EG_mutations = expected_nonsyn_EG_mutations_from_excess+expected_nonsyn_EG_mutations_from_expected_hp+expected_nonsyn_EG_mutations_from_adaptive
+            excess_of_unmutated_strong_nonsyn_sites = total_expected_EG_mutations-observed_strong_nonsyn_eg_mutations
+            expected_non_syn_eg_mut_dist = [sum(i) for i in zip(expected_mut,excess_mut,adaptive_mut)]
+            std =np.std(expected_non_syn_eg_mut_dist)
+            p = float(sum([1 for j in expected_non_syn_eg_mut_dist if j<observed_strong_nonsyn_eg_mutations]))/float(n_random)
+            
+            
+            analysis_name = ancestor+'_to_'+intermediate+'_to_'+leaf+'_'+editing_level_method+'_'+str(weak_levels[1])+'_'+str(strong_levels[0])+'adaptive_rate'+str(opt_adaptive_rate)
+            self.adaptive_model.adaptive_model_data['adaptive'].update({analysis_name:pd.Series(data = [ancestor,intermediate,leaf,optimize_adaptive_rate,percentile if optimize_adaptive_rate else None,
+                                                                                                       editing_level_method,strong_levels[0],strong_levels[1],weak_levels[0],weak_levels[1],
+                                                                                                       opt_adaptive_rate,syn_a,non_syn_a,syn_ag_mut,non_syn_ag_mut,
+                                                                                                       float(syn_ag_mut)/float(syn_a),float(non_syn_ag_mut)/float(non_syn_a),
+                                                                                                       self.adaptive_model.edited_leaves,self.adaptive_model.non_edited_leaves,weak_syn_sites,weak_nonsyn_sites,
+                                                                                                       nonsyn_sites_depletion_factor,strong_syn_sites,strong_nonsyn_sites,opt_adaptive_sites,
+                                                                                                       expected_hp_strong_nonsyn_sites,strong_nonsyn_sites_excess,
+                                                                                                       expected_nonsyn_EG_mutations_from_adaptive,expected_nonsyn_EG_mutations_from_expected_hp,expected_nonsyn_EG_mutations_from_excess,
+                                                                                                       total_expected_EG_mutations,std,observed_strong_nonsyn_eg_mutations,p,strong_nonsyn_eg_mutations_rate,
+                                                                                                       observed_strong_syn_eg_mutations,strong_syn_eg_mutations_rate,excess_of_unmutated_strong_nonsyn_sites],
+                                                                                               index = ['ancestor','intermediate','leaf','optimized_adaptive_rate','optimized_percentile_of_observed_mutation',
+                                                                                                        'combined_editing_level_method','strong_levels_lower_limit','strong_levels_upper_limit','weak_levels_lower_limit','weak_levels_upper_limit',
+                                                                                                        'adaptive_rate','intermediate_syn_a','intermediate_non_syn_a','syn_ag_mut_in_leaf','non_syn_ag_mut_in_leaf',
+                                                                                                        'syn_ag_mut_rate','non_syn_ag_mut_rate',
+                                                                                                        'groups_of_edited_leaves','non_edited_leaves','weak_syn_sites','weak_nonsyn_sites',
+                                                                                                        'nonsyn_sites_depletion_factor','strong_syn_sites','strong_nonsyn_sites','adaptive_sites',
+                                                                                                        'expected_hp_strong_nonsyn_sites','strong_nonsyn_sites_excess',
+                                                                                                        'expected_nonsyn_EG_mutations_from_adaptive','expected_nonsyn_EG_mutations_from_expected_hp','expected_nonsyn_EG_mutations_from_excess',
+                                                                                                        'total_expected_EG_mutations','std','observed_strong_nonsyn_eg_mutations','p','strong_nonsyn_eg_mutations_rate',
+                                                                                                        'observed_strong_syn_eg_mutations','strong_syn_eg_mutations_rate','excess_of_unmutated_strong_nonsyn_sites'], 
+                                                                                               name=leaf)})
+    
 
 
 if __name__=='__main__':
-    
+
+
+    # parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter, description='Harm-permitting and Adaptive models - Hypotheses tests and results based on generated DB containing phylogeny MSA data and editing events')
+    # run_parser = parser.add_argument_group('Run PAML4 for a list of super orthologs proteins msa given a single tree for all')
+    # run_parser.add_argument('--db', dest='nucl_mat_file', action='store', required = True, help='Path to the MSA+RNA editing database create by build_full_tree_nucl_matrix module')
+    # run_parser.add_argument('--tree', dest='tree', action='store', required = True, help='name of tree or path to a newick format tree. avalable trees are:\n'+str(trees))
+    # run_parser.add_argument('--adaptive', dest='adaptive', action='store_true', help='Run adaptive model analysis')
+    # run_parser.add_argument('--hpm', dest='hpm', action='store_true', help='Run HPM model analysis')
+    # arguments = parser.parse_args()
+    # nucl_mat_file = arguments.db
+    # tree = arguments.tree
+    # adaptive = arguments.adaptive
+    # hpm = arguments.hpm
+
     nucl_mat_file = sys.argv[1]
     tree=sys.argv[2]
-    # ancestor = sys.argv[3]
-    # intermediate = sys.argv[4]
-    # leaf = sys.argv[5]
-    # leaf_mutated_nucl = sys.argv[6]
-    # ancestor_nucl = sys.argv[7]
-    # ancestor_nucl = None
-    # leaf_mutated_nucl = 'G'
-    # only_N1=True
-    # if ancestor_nucl=='None':
-    #     ancestor_nucl=None
+    ancestor = sys.argv[3]
+    intermediate = sys.argv[4] 
+    leaf = sys.argv[5]
+    leaf_mutated_nucl = sys.argv[6]
+    ancestor_nucl = sys.argv[7]
+    filter_adeno_w_edit_condition = eval(sys.argv[8])
     
-    trees={'coleoids_rooted':"((oct,bim)O,((sep,squ)S,(bob,lin)B)D)C",
-           'coleoids_unrooted':"((oct,bim)O,(sep,squ)S,(bob,lin)B)C",
-           'all8_rooted':"(apl,(nau,((oct,bim)O,((sep,squ)S,(bob,lin)B)D)C)N1)N0",
-           'all8_unrooted':"(apl,nau,((oct,bim)O,((sep,squ)S,(bob,lin)B)D)C)N0",
-           'no_boblin_rooted':"(apl,(nau,((oct,bim)O,(sep,squ)S)C)N1)N0",
-           'no_boblin_unrooted':"(apl,nau,((oct,bim)O,(sep,squ)S)C)N0",
-           'all8_rooted_ncbi':"(apl,(nau,((oct,bim)O,(squ,(bob,(sep,lin)S1)S0)D)C)N1)N0",   
-           'coleoids_rooted_ncbi':"((oct,bim)O,(squ,(bob,(sep,lin)S1)S0)D)C"}
+    only_N1=True #True if ancestor_nucl should be in N1. False if (N1 || N0) is okay.
+    if ancestor_nucl=='None':
+        ancestor_nucl=None
     
-    newick_tree_str=trees[tree]
-    
-    if 'all8' in tree:
-        animals=['apl','nau','oct','bim','sep','squ','bob','lin']
-    elif 'coleoids' in tree:
-        animals=['oct','bim','sep','squ','bob','lin']
-    elif 'no_boblin' in tree:
-        animals=['apl','nau','oct','bim','sep','squ']
-        
-    outpath = '/'.join(nucl_mat_file.split('/')[0:-1])+'/'
-    print('Reading matrix')
-    nucl_mat=pd.read_csv(nucl_mat_file,sep='\t',error_bad_lines=False, index_col=False, dtype='unicode')
-    nucl_mat=nucl_mat.apply(pd.to_numeric, errors='ignore')
-    print(str(len(nucl_mat)) + ' rows in nucl matrix')
-    
-    hyp=Hypothesis(nucl_mat.copy(),tree_str=newick_tree_str)
-    hpm=Hypothesis.HPM(hyp)
-    hpm.calc_dnds_to_leaves('C', 'G', 'A')
-    hpm.calc_dnds_to_leaves('C', 'G', 'C')
-    hpm.calc_dnds_to_leaves('C', 'G', 'T')
-    hpm.calc_dnds_to_leaves('C', 'C', 'A')
-    hpm.calc_dnds_to_leaves('C', 'T', 'A')
-    hpm.hpm.write_data(outpath,file_name='dnds',data_to_write=['dnds'],file_type='csv',sub_name='')
+    try:
+        newick_tree_str=trees[tree]    
+    except KeyError:
+        newick_tree_str=open(tree,"r").read().lstrip().rstrip()
+    handle = StringIO(newick_tree_str)
+    animals = [t.name for t in Phylo.read(handle, "newick").get_terminals()]      
 
-    
-        
-    
+
+
 # =============================================================================
 #     outpath = '/'.join(nucl_mat_file.split('/')[0:-1])+'/'
 #     print('Reading matrix')
 #     nucl_mat=pd.read_csv(nucl_mat_file,sep='\t',error_bad_lines=False, index_col=False, dtype='unicode')
 #     nucl_mat=nucl_mat.apply(pd.to_numeric, errors='ignore')
 #     print(str(len(nucl_mat)) + ' rows in nucl matrix')
+#     
+#     hyp=Hypothesis(nucl_mat.copy(),tree_str=newick_tree_str)
+#     hpm=Hypothesis.HPM(hyp)
+#     hpm.calc_dnds_to_leaves('C', 'G', 'A')
+#     hpm.calc_dnds_to_leaves('C', 'G', 'C')
+#     hpm.calc_dnds_to_leaves('C', 'G', 'T')
+#     hpm.calc_dnds_to_leaves('C', 'C', 'A')
+#     hpm.calc_dnds_to_leaves('C', 'T', 'A')
+#     hpm.hpm.write_data(outpath,file_name='dnds',data_to_write=['dnds'],file_type='csv',sub_name='')
 # =============================================================================
-    
-    
+
+
 # =============================================================================
+#     outpath = '/'.join(nucl_mat_file.split('/')[0:-1])+'/'
+#     print('Reading matrix')
+#     nucl_mat=pd.read_csv(nucl_mat_file,sep='\t',error_bad_lines=False, index_col=False, dtype='unicode')
+#     nucl_mat=nucl_mat.apply(pd.to_numeric, errors='ignore')
+#     print(str(len(nucl_mat)) + ' rows in nucl matrix')
+#     
+#     
 #     animals=['oct','bim','sep','squ','bob','lin']
 #     columns=['anmimal','syn_sites','syn_a','nonsyn_sites','nonsyn_a']
 #     data=[]
@@ -1252,206 +1204,83 @@ if __name__=='__main__':
 #     hyp=Hypothesis(nucl_mat.copy(),tree_str=newick_tree_str)
 #     hpm=Hypothesis.HPM(hyp)
 # 
-#     hpm.calc_editing_types_rates('sep')
-#     hpm.calc_editing_types_rates('squ')
-#     hpm.calc_editing_types_rates('oct')
-#     hpm.calc_editing_types_rates('bim')
-#     hpm.calc_editing_types_rates('bob')
-#     hpm.calc_editing_types_rates('lin')
-#     hpm.calc_editing_types_rates(['bim','oct'])
-#     hpm.calc_editing_types_rates(['sep','squ'])
-#     hpm.calc_editing_types_rates(['bob','lin'])
-#     hpm.calc_editing_types_rates(['sep','squ','bob','lin'])
-#     hpm.calc_editing_types_rates(['sep','squ','oct','bim'])
-#     hpm.calc_editing_types_rates(['sep','squ','bob','lin','oct','bim'])
-#     hpm.hpm.write_data(outpath,file_name='editing_types_rates_strong',data_to_write=['editing_types_rates'],file_type='csv',sub_name='')
+#     # hpm.calc_editing_types_rates('sep')
+#     # hpm.calc_editing_types_rates('squ')
+#     # hpm.calc_editing_types_rates('oct')
+#     # hpm.calc_editing_types_rates('bim')
+#     # hpm.calc_editing_types_rates('bob')
+#     # hpm.calc_editing_types_rates('lin')
+#     # hpm.calc_editing_types_rates(['bim','oct'])
+#     # hpm.calc_editing_types_rates(['squ','lin'])
+#     # hpm.calc_editing_types_rates(['squ','lin','bob'])
+#     # hpm.calc_editing_types_rates(['sep','squ','bob','lin'])
+#     # hpm.calc_editing_types_rates(['sep','squ','bob','lin','oct','bim'])
+#     # hpm.hpm.write_data(outpath,file_name='editing_types_rates_all',data_to_write=['editing_types_rates'],file_type='csv',sub_name='')
 # 
-#     del(hpm)
-#     hpm=Hypothesis.HPM(hyp)
-#     hpm.calc_editing_types_rates('sep',editing_levels=[0.1,1])
-#     hpm.calc_editing_types_rates('squ',editing_levels=[0.1,1])
-#     hpm.calc_editing_types_rates('oct',editing_levels=[0.1,1])
-#     hpm.calc_editing_types_rates('bim',editing_levels=[0.1,1])
-#     hpm.calc_editing_types_rates('bob',editing_levels=[0.1,1])
-#     hpm.calc_editing_types_rates('lin',editing_levels=[0.1,1])
-#     hpm.calc_editing_types_rates(['bim','oct'],editing_levels=[0.1,1])
-#     hpm.calc_editing_types_rates(['sep','squ'],editing_levels=[0.1,1])
-#     hpm.calc_editing_types_rates(['bob','lin'],editing_levels=[0.1,1])
-#     hpm.calc_editing_types_rates(['sep','squ','bob','lin'],editing_levels=[0.1,1])
-#     hpm.calc_editing_types_rates(['sep','squ','oct','bim'],editing_levels=[0.1,1])
-#     hpm.calc_editing_types_rates(['sep','squ','bob','lin','oct','bim'],editing_levels=[0.1,1])
-#     hpm.hpm.write_data(outpath,file_name='editing_types_rates_strong',data_to_write=['editing_types_rates'],file_type='csv',sub_name='')
+#     # del(hyp)
+#     # del(hpm)
+#     # hyp=Hypothesis(nucl_mat.copy(),tree_str=newick_tree_str)
+#     # hpm=Hypothesis.HPM(hyp)
+#     # hpm.calc_editing_types_rates('sep',editing_levels=[0.1,1])
+#     # hpm.calc_editing_types_rates('squ',editing_levels=[0.1,1])
+#     # hpm.calc_editing_types_rates('oct',editing_levels=[0.1,1])
+#     # hpm.calc_editing_types_rates('bim',editing_levels=[0.1,1])
+#     # hpm.calc_editing_types_rates('bob',editing_levels=[0.1,1])
+#     # hpm.calc_editing_types_rates('lin',editing_levels=[0.1,1])
+#     # hpm.calc_editing_types_rates(['bim','oct'],editing_levels=[0.1,1])
+#     # hpm.calc_editing_types_rates(['squ','lin'],editing_levels=[0.1,1])
+#     # hpm.calc_editing_types_rates(['squ','lin','bob'],editing_levels=[0.1,1])
+#     # hpm.calc_editing_types_rates(['sep','squ','bob','lin'],editing_levels=[0.1,1])
+#     # hpm.calc_editing_types_rates(['sep','squ','bob','lin','oct','bim'],editing_levels=[0.1,1])
+#     # hpm.hpm.write_data(outpath,file_name='editing_types_rates_strong',data_to_write=['editing_types_rates'],file_type='csv',sub_name='')
 #     
-#     del(hpm)
-#     hpm=Hypothesis.HPM(hyp)
-#     hpm.calc_editing_types_rates('sep',editing_levels=[0,0.1])
-#     hpm.calc_editing_types_rates('squ',editing_levels=[0,0.1])
-#     hpm.calc_editing_types_rates('oct',editing_levels=[0,0.1])
-#     hpm.calc_editing_types_rates('bim',editing_levels=[0,0.1])
-#     hpm.calc_editing_types_rates('bob',editing_levels=[0,0.1])
-#     hpm.calc_editing_types_rates('lin',editing_levels=[0,0.1])
-#     hpm.calc_editing_types_rates(['bim','oct'],editing_levels=[0,0.1])
-#     hpm.calc_editing_types_rates(['sep','squ'],editing_levels=[0,0.1])
-#     hpm.calc_editing_types_rates(['bob','lin'],editing_levels=[0,0.1])
-#     hpm.calc_editing_types_rates(['sep','squ','bob','lin'],editing_levels=[0,0.1])
-#     hpm.calc_editing_types_rates(['sep','squ','oct','bim'],editing_levels=[0,0.1])
-#     hpm.calc_editing_types_rates(['sep','squ','bob','lin','oct','bim'],editing_levels=[0,0.1])
-#     hpm.hpm.write_data(outpath,file_name='editing_types_rates_weak',data_to_write=['editing_types_rates'],file_type='csv',sub_name='')
-# #    
+#     # del(hyp)
+#     # del(hpm)
+#     # hyp=Hypothesis(nucl_mat.copy(),tree_str=newick_tree_str)
+#     # hpm=Hypothesis.HPM(hyp)
+#     # hpm.calc_editing_types_rates('sep',editing_levels=[0,0.1])
+#     # hpm.calc_editing_types_rates('squ',editing_levels=[0,0.1])
+#     # hpm.calc_editing_types_rates('oct',editing_levels=[0,0.1])
+#     # hpm.calc_editing_types_rates('bim',editing_levels=[0,0.1])
+#     # hpm.calc_editing_types_rates('bob',editing_levels=[0,0.1])
+#     # hpm.calc_editing_types_rates('lin',editing_levels=[0,0.1])
+#     # hpm.calc_editing_types_rates(['bim','oct'],editing_levels=[0,0.1])
+#     # hpm.calc_editing_types_rates(['squ','lin'],editing_levels=[0,0.1])
+#     # hpm.calc_editing_types_rates(['squ','lin','bob'],editing_levels=[0,0.1])
+#     # hpm.calc_editing_types_rates(['sep','squ','bob','lin'],editing_levels=[0,0.1])
+#     # hpm.calc_editing_types_rates(['sep','squ','bob','lin','oct','bim'],editing_levels=[0,0.1])
+#     # hpm.hpm.write_data(outpath,file_name='editing_types_rates_weak',data_to_write=['editing_types_rates'],file_type='csv',sub_name='')
 # 
-#     del(hpm)
-#     hpm=Hypothesis.HPM(hyp) 
-#     hpm.collect_editing_levels_distributions_by_types('sep')
-#     hpm.collect_editing_levels_distributions_by_types('squ')
-#     hpm.collect_editing_levels_distributions_by_types('oct')
-#     hpm.collect_editing_levels_distributions_by_types('bim')
-#     hpm.collect_editing_levels_distributions_by_types('bob')
-#     hpm.collect_editing_levels_distributions_by_types('lin')
-#     hpm.collect_editing_levels_distributions_by_types(['bim','oct'])
-#     hpm.collect_editing_levels_distributions_by_types(['sep','squ'])
-#     hpm.collect_editing_levels_distributions_by_types(['bob','lin'])
-#     hpm.collect_editing_levels_distributions_by_types(['sep','squ','bob','lin'])
-#     hpm.collect_editing_levels_distributions_by_types(['sep','squ','oct','bim'])
-#     hpm.collect_editing_levels_distributions_by_types(['sep','squ','bob','lin','oct','bim'])
-#     hpm.hpm.write_data(outpath,file_name='editing_levels_by_types',data_to_write=['editing_levels_by_types'],file_type='csv',sub_name='')
-#     
-#     # hpm.calc_acestral_states_rates('sep')
-#     # hpm.calc_acestral_states_rates('squ')
-#     # hpm.calc_acestral_states_rates('oct')
-#     # hpm.calc_acestral_states_rates('bim')
-#     # hpm.calc_acestral_states_rates('bob')
-#     # hpm.calc_acestral_states_rates('lin')
-#     # hpm.calc_acestral_states_rates(['bim','oct'])
-#     # hpm.calc_acestral_states_rates(['sep','squ'])
-#     # hpm.calc_acestral_states_rates(['bob','lin'])
-#     # hpm.calc_acestral_states_rates(['sep','squ','bob','lin'])
-#     # hpm.calc_acestral_states_rates(['sep','squ','oct','bim'])
-#     # hpm.calc_acestral_states_rates(['sep','squ','bob','lin','oct','bim'])
-#     # hpm.hpm.write_data(outpath,file_name='ancestral_editing_types_rates',data_to_write=['editing_ancestral_rates'],file_type='csv',sub_name='')
 # 
+#     # del(hyp)
 #     # del(hpm)
-#     # hpm=Hypothesis.HPM(hyp)
-#     # hpm.calc_acestral_states_rates('sep',editing_levels=[0.1,1])
-#     # hpm.calc_acestral_states_rates('squ',editing_levels=[0.1,1])
-#     # hpm.calc_acestral_states_rates('oct',editing_levels=[0.1,1])
-#     # hpm.calc_acestral_states_rates('bim',editing_levels=[0.1,1])
-#     # hpm.calc_acestral_states_rates('bob',editing_levels=[0.1,1])
-#     # hpm.calc_acestral_states_rates('lin',editing_levels=[0.1,1])
-#     # hpm.calc_acestral_states_rates(['bim','oct'],editing_levels=[0.1,1])
-#     # hpm.calc_acestral_states_rates(['sep','squ'],editing_levels=[0.1,1])
-#     # hpm.calc_acestral_states_rates(['bob','lin'],editing_levels=[0.1,1])
-#     # hpm.calc_acestral_states_rates(['sep','squ','bob','lin'],editing_levels=[0.1,1])
-#     # hpm.calc_acestral_states_rates(['sep','squ','oct','bim'],editing_levels=[0.1,1])
-#     # hpm.calc_acestral_states_rates(['sep','squ','bob','lin','oct','bim'],editing_levels=[0.1,1])
-#     # hpm.hpm.write_data(outpath,file_name='ancestral_editing_types_rates_strong',data_to_write=['editing_ancestral_rates'],file_type='csv',sub_name='')
-#     
-#     # del(hpm)
-#     # hpm=Hypothesis.HPM(hyp)
-#     # hpm.calc_acestral_states_rates('sep',editing_levels=[0,0.1])
-#     # hpm.calc_acestral_states_rates('squ',editing_levels=[0,0.1])
-#     # hpm.calc_acestral_states_rates('oct',editing_levels=[0,0.1])
-#     # hpm.calc_acestral_states_rates('bim',editing_levels=[0,0.1])
-#     # hpm.calc_acestral_states_rates('bob',editing_levels=[0,0.1])
-#     # hpm.calc_acestral_states_rates('lin',editing_levels=[0,0.1])
-#     # hpm.calc_acestral_states_rates(['bim','oct'],editing_levels=[0,0.1])
-#     # hpm.calc_acestral_states_rates(['sep','squ'],editing_levels=[0,0.1])
-#     # hpm.calc_acestral_states_rates(['bob','lin'],editing_levels=[0,0.1])
-#     # hpm.calc_acestral_states_rates(['sep','squ','bob','lin'],editing_levels=[0,0.1])
-#     # hpm.calc_acestral_states_rates(['sep','squ','oct','bim'],editing_levels=[0,0.1])
-#     # hpm.calc_acestral_states_rates(['sep','squ','bob','lin','oct','bim'],editing_levels=[0,0.1])
-#     # hpm.hpm.write_data(outpath,file_name='ancestral_editing_types_rates_weak',data_to_write=['editing_ancestral_rates'],file_type='csv',sub_name='')
-#     
-#     # del(hpm)
-#     # hpm=Hypothesis.HPM(hyp)
-#     # hpm.collect_editing_levels_distributions_by_ancestral_state('sep')
-#     # hpm.collect_editing_levels_distributions_by_ancestral_state('squ')
-#     # hpm.collect_editing_levels_distributions_by_ancestral_state('oct')
-#     # hpm.collect_editing_levels_distributions_by_ancestral_state('bim')
-#     # hpm.collect_editing_levels_distributions_by_ancestral_state('bob')
-#     # hpm.collect_editing_levels_distributions_by_ancestral_state('lin')
-#     # hpm.collect_editing_levels_distributions_by_ancestral_state(['bim','oct'])
-#     # hpm.collect_editing_levels_distributions_by_ancestral_state(['sep','squ'])
-#     # hpm.collect_editing_levels_distributions_by_ancestral_state(['bob','lin'])
-#     # hpm.collect_editing_levels_distributions_by_ancestral_state(['sep','squ','bob','lin'])
-#     # hpm.collect_editing_levels_distributions_by_ancestral_state(['sep','squ','oct','bim'])
-#     # hpm.collect_editing_levels_distributions_by_ancestral_state(['sep','squ','bob','lin','oct','bim'])
-#     # hpm.hpm.write_data(outpath,file_name='ancestral_editing_leveils_by_types',data_to_write=['editing_levels_by_ancestral_state'],file_type='csv',sub_name='')
+#     # hyp=Hypothesis(nucl_mat.copy(),tree_str=newick_tree_str)
+#     # hpm=Hypothesis.HPM(hyp) 
+#     # hpm.collect_editing_levels_distributions_by_types('sep')
+#     # hpm.collect_editing_levels_distributions_by_types('squ')
+#     # hpm.collect_editing_levels_distributions_by_types('oct')
+#     # hpm.collect_editing_levels_distributions_by_types('bim')
+#     # hpm.collect_editing_levels_distributions_by_types('bob')
+#     # hpm.collect_editing_levels_distributions_by_types('lin')
+#     # hpm.collect_editing_levels_distributions_by_types(['bim','oct'])
+#     # hpm.collect_editing_levels_distributions_by_types(['squ','lin'])
+#     # hpm.collect_editing_levels_distributions_by_types(['squ','lin','bob'])
+#     # hpm.collect_editing_levels_distributions_by_types(['sep','squ','bob','lin'])
+#     # hpm.collect_editing_levels_distributions_by_types(['sep','squ','bob','lin','oct','bim'])
+#     # hpm.hpm.write_data(outpath,file_name='editing_levels_distribution_by_type',data_to_write=['editing_levels_distribution_by_type'],file_type='csv',sub_name='')
 # =============================================================================
     
     
-
 # =============================================================================
-#     hyp=Hypothesis(nucl_mat.copy(),tree_str=newick_tree_str)
-#     hpm=Hypothesis.HPM(hyp)
-# 
-#     hpm.calc_editing_types_rates('sep')
-#     hpm.calc_editing_types_rates('squ')
-#     hpm.calc_editing_types_rates('oct')
-#     hpm.calc_editing_types_rates('bim')
-#     hpm.calc_editing_types_rates('bob')
-#     hpm.calc_editing_types_rates('lin')
-#     hpm.calc_editing_types_rates(['bim','oct'])
-#     hpm.calc_editing_types_rates(['sep','lin'])
-#     hpm.calc_editing_types_rates(['sep','bob','lin'])
-#     hpm.calc_editing_types_rates(['sep','squ','bob','lin'])
-#     hpm.calc_editing_types_rates(['sep','squ','bob','lin','oct','bim'])
-#     hpm.hpm.write_data(outpath,file_name='editing_types_rates_strong',data_to_write=['editing_types_rates'],file_type='csv',sub_name='')
-# 
-#     del(hpm)
-#     del(hyp)
-#     hyp=Hypothesis(nucl_mat.copy(),tree_str=newick_tree_str)
-#     hpm=Hypothesis.HPM(hyp)
-#     hpm.calc_editing_types_rates('sep',editing_levels=[0.1,1])
-#     hpm.calc_editing_types_rates('squ',editing_levels=[0.1,1])
-#     hpm.calc_editing_types_rates('oct',editing_levels=[0.1,1])
-#     hpm.calc_editing_types_rates('bim',editing_levels=[0.1,1])
-#     hpm.calc_editing_types_rates('bob',editing_levels=[0.1,1])
-#     hpm.calc_editing_types_rates('lin',editing_levels=[0.1,1])
-#     hpm.calc_editing_types_rates(['bim','oct'],editing_levels=[0.1,1])
-#     hpm.calc_editing_types_rates(['sep','lin'],editing_levels=[0.1,1])
-#     hpm.calc_editing_types_rates(['sep','bob','lin'],editing_levels=[0.1,1])
-#     hpm.calc_editing_types_rates(['sep','squ','bob','lin'],editing_levels=[0.1,1])
-#     hpm.calc_editing_types_rates(['sep','squ','bob','lin','oct','bim'],editing_levels=[0.1,1])
-#     hpm.hpm.write_data(outpath,file_name='editing_types_rates_strong',data_to_write=['editing_types_rates'],file_type='csv',sub_name='')
+#     outpath = '/'.join(nucl_mat_file.split('/')[0:-1])+'/'
+#     print('Reading matrix')
+#     nucl_mat=pd.read_csv(nucl_mat_file,sep='\t',error_bad_lines=False, index_col=False, dtype='unicode')
+#     nucl_mat=nucl_mat.apply(pd.to_numeric, errors='ignore')
+#     print(str(len(nucl_mat)) + ' rows in nucl matrix')
 #     
-#     del(hpm)
-#     del(hyp)
 #     hyp=Hypothesis(nucl_mat.copy(),tree_str=newick_tree_str)
 #     hpm=Hypothesis.HPM(hyp)
-#     hpm.calc_editing_types_rates('sep',editing_levels=[0,0.1])
-#     hpm.calc_editing_types_rates('squ',editing_levels=[0,0.1])
-#     hpm.calc_editing_types_rates('oct',editing_levels=[0,0.1])
-#     hpm.calc_editing_types_rates('bim',editing_levels=[0,0.1])
-#     hpm.calc_editing_types_rates('bob',editing_levels=[0,0.1])
-#     hpm.calc_editing_types_rates('lin',editing_levels=[0,0.1])
-#     hpm.calc_editing_types_rates(['bim','oct'],editing_levels=[0,0.1])
-#     hpm.calc_editing_types_rates(['sep','lin'],editing_levels=[0,0.1])
-#     hpm.calc_editing_types_rates(['sep','bob','lin'],editing_levels=[0,0.1])
-#     hpm.calc_editing_types_rates(['sep','squ','bob','lin'],editing_levels=[0,0.1])
-#     hpm.calc_editing_types_rates(['sep','squ','bob','lin','oct','bim'],editing_levels=[0,0.1])
-#     hpm.hpm.write_data(outpath,file_name='editing_types_rates_weak',data_to_write=['editing_types_rates'],file_type='csv',sub_name='')
-# 
-#     del(hpm)
-#     del(hyp)
-#     hyp=Hypothesis(nucl_mat.copy(),tree_str=newick_tree_str)
-#     hpm=Hypothesis.HPM(hyp)
-#     hpm.collect_editing_levels_distributions_by_types('sep')
-#     hpm.collect_editing_levels_distributions_by_types('squ')
-#     hpm.collect_editing_levels_distributions_by_types('oct')
-#     hpm.collect_editing_levels_distributions_by_types('bim')
-#     hpm.collect_editing_levels_distributions_by_types('bob')
-#     hpm.collect_editing_levels_distributions_by_types('lin')
-#     hpm.collect_editing_levels_distributions_by_types(['bim','oct'])
-#     hpm.collect_editing_levels_distributions_by_types(['sep','lin'])
-#     hpm.collect_editing_levels_distributions_by_types(['sep','bob','lin'])
-#     hpm.collect_editing_levels_distributions_by_types(['sep','squ','bob','lin'])
-#     hpm.collect_editing_levels_distributions_by_types(['sep','squ','bob','lin','oct','bim'])
-#     hpm.hpm.write_data(outpath,file_name='editing_levels_by_types',data_to_write=['editing_levels_by_types'],file_type='csv',sub_name='')
-# 
-#     del(hpm)
-#     del(hyp)
-#     hyp=Hypothesis(nucl_mat.copy(),tree_str=newick_tree_str)
-#     hpm=Hypothesis.HPM(hyp)
+#     
 #     hpm.calc_acestral_states_rates('sep')
 #     hpm.calc_acestral_states_rates('squ')
 #     hpm.calc_acestral_states_rates('oct')
@@ -1459,15 +1288,14 @@ if __name__=='__main__':
 #     hpm.calc_acestral_states_rates('bob')
 #     hpm.calc_acestral_states_rates('lin')
 #     hpm.calc_acestral_states_rates(['bim','oct'])
-#     hpm.calc_acestral_states_rates(['sep','lin'])
-#     hpm.calc_acestral_states_rates(['sep','bob','lin'])
+#     hpm.calc_acestral_states_rates(['sep','squ'])
+#     hpm.calc_acestral_states_rates(['bob','lin'])
 #     hpm.calc_acestral_states_rates(['sep','squ','bob','lin'])
+#     hpm.calc_acestral_states_rates(['sep','squ','oct','bim'])
 #     hpm.calc_acestral_states_rates(['sep','squ','bob','lin','oct','bim'])
 #     hpm.hpm.write_data(outpath,file_name='ancestral_editing_types_rates',data_to_write=['editing_ancestral_rates'],file_type='csv',sub_name='')
 # 
 #     del(hpm)
-#     del(hyp)
-#     hyp=Hypothesis(nucl_mat.copy(),tree_str=newick_tree_str)
 #     hpm=Hypothesis.HPM(hyp)
 #     hpm.calc_acestral_states_rates('sep',editing_levels=[0.1,1])
 #     hpm.calc_acestral_states_rates('squ',editing_levels=[0.1,1])
@@ -1476,15 +1304,14 @@ if __name__=='__main__':
 #     hpm.calc_acestral_states_rates('bob',editing_levels=[0.1,1])
 #     hpm.calc_acestral_states_rates('lin',editing_levels=[0.1,1])
 #     hpm.calc_acestral_states_rates(['bim','oct'],editing_levels=[0.1,1])
-#     hpm.calc_acestral_states_rates(['sep','lin'],editing_levels=[0.1,1])
-#     hpm.calc_acestral_states_rates(['sep','bob','lin'],editing_levels=[0.1,1])
+#     hpm.calc_acestral_states_rates(['sep','squ'],editing_levels=[0.1,1])
+#     hpm.calc_acestral_states_rates(['bob','lin'],editing_levels=[0.1,1])
 #     hpm.calc_acestral_states_rates(['sep','squ','bob','lin'],editing_levels=[0.1,1])
+#     hpm.calc_acestral_states_rates(['sep','squ','oct','bim'],editing_levels=[0.1,1])
 #     hpm.calc_acestral_states_rates(['sep','squ','bob','lin','oct','bim'],editing_levels=[0.1,1])
 #     hpm.hpm.write_data(outpath,file_name='ancestral_editing_types_rates_strong',data_to_write=['editing_ancestral_rates'],file_type='csv',sub_name='')
 #     
 #     del(hpm)
-#     del(hyp)
-#     hyp=Hypothesis(nucl_mat.copy(),tree_str=newick_tree_str)
 #     hpm=Hypothesis.HPM(hyp)
 #     hpm.calc_acestral_states_rates('sep',editing_levels=[0,0.1])
 #     hpm.calc_acestral_states_rates('squ',editing_levels=[0,0.1])
@@ -1493,15 +1320,14 @@ if __name__=='__main__':
 #     hpm.calc_acestral_states_rates('bob',editing_levels=[0,0.1])
 #     hpm.calc_acestral_states_rates('lin',editing_levels=[0,0.1])
 #     hpm.calc_acestral_states_rates(['bim','oct'],editing_levels=[0,0.1])
-#     hpm.calc_acestral_states_rates(['sep','lin'],editing_levels=[0,0.1])
-#     hpm.calc_acestral_states_rates(['sep','bob','lin'],editing_levels=[0,0.1])
+#     hpm.calc_acestral_states_rates(['sep','squ'],editing_levels=[0,0.1])
+#     hpm.calc_acestral_states_rates(['bob','lin'],editing_levels=[0,0.1])
 #     hpm.calc_acestral_states_rates(['sep','squ','bob','lin'],editing_levels=[0,0.1])
+#     hpm.calc_acestral_states_rates(['sep','squ','oct','bim'],editing_levels=[0,0.1])
 #     hpm.calc_acestral_states_rates(['sep','squ','bob','lin','oct','bim'],editing_levels=[0,0.1])
 #     hpm.hpm.write_data(outpath,file_name='ancestral_editing_types_rates_weak',data_to_write=['editing_ancestral_rates'],file_type='csv',sub_name='')
 #     
 #     del(hpm)
-#     del(hyp)
-#     hyp=Hypothesis(nucl_mat.copy(),tree_str=newick_tree_str)
 #     hpm=Hypothesis.HPM(hyp)
 #     hpm.collect_editing_levels_distributions_by_ancestral_state('sep')
 #     hpm.collect_editing_levels_distributions_by_ancestral_state('squ')
@@ -1510,11 +1336,12 @@ if __name__=='__main__':
 #     hpm.collect_editing_levels_distributions_by_ancestral_state('bob')
 #     hpm.collect_editing_levels_distributions_by_ancestral_state('lin')
 #     hpm.collect_editing_levels_distributions_by_ancestral_state(['bim','oct'])
-#     hpm.collect_editing_levels_distributions_by_ancestral_state(['sep','lin'])
-#     hpm.collect_editing_levels_distributions_by_ancestral_state(['sep','bob','lin'])
+#     hpm.collect_editing_levels_distributions_by_ancestral_state(['sep','squ'])
+#     hpm.collect_editing_levels_distributions_by_ancestral_state(['bob','lin'])
 #     hpm.collect_editing_levels_distributions_by_ancestral_state(['sep','squ','bob','lin'])
+#     hpm.collect_editing_levels_distributions_by_ancestral_state(['sep','squ','oct','bim'])
 #     hpm.collect_editing_levels_distributions_by_ancestral_state(['sep','squ','bob','lin','oct','bim'])
-#     hpm.hpm.write_data(outpath,file_name='ancestral_editing_leveils_by_types',data_to_write=['editing_levels_by_ancestral_state'],file_type='csv',sub_name='')
+#     hpm.hpm.write_data(outpath,file_name='editing_levels_distribution_by_ancestral state',data_to_write=['editing_levels_by_ancestral_state'],file_type='csv',sub_name='')
 # =============================================================================
     
 # =============================================================================
@@ -1567,62 +1394,13 @@ if __name__=='__main__':
     
 
 # =============================================================================
-#     outpath = '/'.join(nucl_mat_file.split('/')[0:-1])+'/'
-#     print('Reading matrix')
-#     nucl_mat=pd.read_csv(nucl_mat_file,sep='\t',error_bad_lines=False, index_col=False, dtype='unicode')
-#     nucl_mat=nucl_mat.apply(pd.to_numeric, errors='ignore')
-#     print(str(len(nucl_mat)) + ' rows in nucl matrix')
 #     
-#     non_edited_leaves = []
-#     nucl_mat = nucl_mat[nucl_mat[intermediate+'_nuc']=="A"].copy()
+#     nucl_mat_file = 'D:/RNA_Editing_large_files_Backup_20201205/Phylogeny/results/Raxml/coleoids/edited_rows_coleoids'
+#     tree='coleoids_rooted'
+#     ancestor_nucl = None
+#     only_N1=True
 #     
-#     if ancestor_nucl is not None:
-#         if 'unrooted' in tree:
-#             nucl_mat = nucl_mat[nucl_mat['N0_nuc']==ancestor_nucl].copy()
-#         elif 'rooted' in tree:
-#             if only_N1:
-#                 nucl_mat = nucl_mat[nucl_mat['N1_nuc']==ancestor_nucl].copy()
-#             else:
-#                 nucl_mat = nucl_mat[np.logical_or(nucl_mat['N1_nuc']==ancestor_nucl,nucl_mat['N0_nuc']==ancestor_nucl)].copy()
-#         
-#     hyp=Hypothesis(nucl_mat.copy(),tree_str=newick_tree_str)
-#     gm = Hypothesis.General_model(hyp)
-#     file_name='ances'+str(ancestor_nucl)+'_'+ancestor+'_'+intermediate+'_'+leaf+'_no_msa_filter'
-#     for editing_level_method in ['average','maximal','minimal']:
-#         for strong_levels in [[0.1,1],[0.15,1],[0.2,1],[0.3,1]]:
-#             print('Strict - editing levels method: '+editing_level_method+' strong levels:'+str(strong_levels))
-# #            gm.strict(ancestor,intermediate,leaf,leaf_mutated_nucl,strong_levels=strong_levels,non_edited_leaves=non_edited_leaves,editing_level_method=editing_level_method,sites_recalculation=False)
-#             for weak_levels in [[0,0.01],[0,0.02],[0,0.05]]:
-#                 print('liberal - editing levels method: '+editing_level_method+' strong levels:'+str(strong_levels)+'_weak_levels:'+str(weak_levels))
-#                 gm.liberal(ancestor,intermediate,leaf,leaf_mutated_nucl,weak_levels=weak_levels,strong_levels=strong_levels,non_edited_leaves=non_edited_leaves,editing_level_method=editing_level_method,sites_recalculation=False)
-# #    gm.general_model.write_data(outpath,file_name=file_name,file_type='csv',data_to_write = ['strict','liberal'])
-#     gm.general_model.write_data(outpath,file_name=file_name,file_type='csv',data_to_write = ['liberal'])
-#     
-#     
-#     iden_filter_cols = [col for col in nucl_mat.columns if ('aa_range' in col and leaf not in col and all([a in col for a in animals if a!=leaf ]))]
-#     print('Creating general models from C')
-#     for r in [5,10,15,20]:
-#         filter_col = [c for c in iden_filter_cols if str(r) in c][0] 
-#         for iden in [0.3,0.5,0.7]:
-#             print('filtering '+filter_col+' for '+str(iden)+' and above')
-#             filtered_nucl_mat = nucl_mat[nucl_mat[filter_col]>=iden]
-#             hyp=Hypothesis(filtered_nucl_mat.copy(),tree_str=newick_tree_str)
-#             gm = Hypothesis.General_model(hyp)
-#             file_name='ances'+str(ancestor_nucl)+'_'+ancestor+'_'+intermediate+'_'+leaf+'_iden'+str(iden)+'_in_range'+str(r)
-#             for editing_level_method in ['average','maximal','minimal']:
-#                 for strong_levels in [[0.1,1],[0.15,1],[0.2,1],[0.3,1]]:
-#                     print('Strict - editing levels method: '+editing_level_method+' strong levels:'+str(strong_levels))
-# #                    gm.strict(ancestor,intermediate,leaf,leaf_mutated_nucl,strong_levels=strong_levels,non_edited_leaves=non_edited_leaves,editing_level_method=editing_level_method,sites_recalculation=False)
-#                     for weak_levels in [[0,0.01],[0,0.02],[0,0.05]]:
-#                         print('liberal - editing levels method: '+editing_level_method+' strong levels:'+str(strong_levels)+'_weak_levels:'+str(weak_levels))
-#                         gm.liberal(ancestor,intermediate,leaf,leaf_mutated_nucl,weak_levels=weak_levels,strong_levels=strong_levels,non_edited_leaves=non_edited_leaves,editing_level_method=editing_level_method,sites_recalculation=False)
-# #            gm.general_model.write_data(outpath,file_name=file_name,file_type='csv',data_to_write = ['strict','liberal'])
-#             gm.general_model.write_data(outpath,file_name=file_name,file_type='csv',data_to_write = ['liberal'])
-# =============================================================================
-    
-    
-# =============================================================================
-#     outpath = '/'.join(nucl_mat_file.split('/')[0:-1])+'/'
+#     outpath = '/'.join(nucl_mat_file.split('/')[0:-1])+'/mutations'
 #     print('Reading matrix')
 #     nucl_mat=pd.read_csv(nucl_mat_file,sep='\t',error_bad_lines=False, index_col=False, dtype='unicode')
 #     nucl_mat=nucl_mat.apply(pd.to_numeric, errors='ignore')
@@ -1637,80 +1415,78 @@ if __name__=='__main__':
 #             else:
 #                 nucl_mat = nucl_mat[np.logical_or(nucl_mat['N1_nuc']==ancestor_nucl,nucl_mat['N0_nuc']==ancestor_nucl)].copy()
 #     
-#     file_name='mutations_count_in_edited_unedited_sites_'+ancestor+'_'+intermediate+'_'+leaf
-#     iden_filter_cols = [col for col in nucl_mat.columns if ('aa_range' in col and leaf not in col and all([a in col for a in animals if a!=leaf ]))]
-#     filter_col = [c for c in iden_filter_cols if str(10) in c][0] 
-#     filtered_nucl_mat = nucl_mat[nucl_mat[filter_col]>=0.3].copy()
-#     hyp=Hypothesis(filtered_nucl_mat,tree_str=newick_tree_str)
-#     gm = Hypothesis.General_model(hyp)
-#     gm.compare_edited_and_unedited_substitution(ancestor, intermediate, leaf, intermediate_nucl='A', leaf_nucl='G', syn=True)
-#     gm.compare_edited_and_unedited_substitution(ancestor, intermediate, leaf, intermediate_nucl='A', leaf_nucl='C', syn=False)
-#     gm.compare_edited_and_unedited_substitution(ancestor, intermediate, leaf, intermediate_nucl='A', leaf_nucl='T', syn=False)
-#     gm.general_model.write_data(outpath,file_name=file_name,file_type='csv',data_to_write = ['mutations_count'])
+#     for a in animals:
+#         []
+#         file_name='mutations_count_in_edited_unedited_sites_'+ancestor+'_'+intermediate+'_'+leaf
+#         iden_filter_cols = [col for col in nucl_mat.columns if ('aa_range' in col and leaf not in col and all([a in col for a in animals if a!=leaf ]))]
+#         filter_col = [c for c in iden_filter_cols if str(10) in c][0] 
+#         filtered_nucl_mat = nucl_mat[nucl_mat[filter_col]>=0.3].copy()
+#         hyp=Hypothesis(filtered_nucl_mat,tree_str=newick_tree_str)
+#         gm = Hypothesis.Adaptive_model(hyp)
+#         gm.compare_edited_and_unedited_substitution(ancestor, intermediate, leaf, intermediate_nucl='A', leaf_nucl='G', syn=True)
+#         gm.compare_edited_and_unedited_substitution(ancestor, intermediate, leaf, intermediate_nucl='A', leaf_nucl='G', syn=False)
+#         gm.compare_edited_and_unedited_substitution(ancestor, intermediate, leaf, intermediate_nucl='A', leaf_nucl='C', syn=False)
+#         gm.compare_edited_and_unedited_substitution(ancestor, intermediate, leaf, intermediate_nucl='A', leaf_nucl='T', syn=False)
+#         gm.adaptive_model.write_data(outpath,file_name=file_name,file_type='csv',data_to_write = ['mutations_count'])
 # =============================================================================
     
     
 
+    print('Running adaptive model analysis with parameters:')
+    print('tree: '+str(tree))
+    print('ancestor: '+str(ancestor))
+    print('intermediate: '+str(intermediate))
+    print('leaf: '+str(leaf))
+    print('leaf_mutated_nucl: '+str(leaf_mutated_nucl))
+    print('ancestor_nucl: '+str(ancestor_nucl))
+    print('filter_adeno_w_edit_condition: '+str(filter_adeno_w_edit_condition))
     
-# =============================================================================
-#     arguments_groups=[('C','D','sep',[('lin','bob','oct','bim')]),
-#                       ('C','D','squ',[('lin','bob','oct','bim')]),
-#                       ('C','D','bob',[('sep','squ','oct','bim')]),
-#                       ('C','D','lin',[('sep','squ','oct','bim')]),
-#                       ('C','B','bob',[('lin','sep','squ','oct','bim')]),
-#                       ('C','B','lin',[('bob','sep','squ','oct','bim')]),
-#                       ('C','S','sep',[('lin','bob','squ','oct','bim')]),
-#                       ('C','S','squ',[('lin','bob','sep','oct','bim')])]
-#     
-#     for args in arguments_groups:
-#         
-#         non_edited_leaves = []
-#         ancestor_nucl=None
-#         ancestor = args[0]
-#         intermediate = args[1]
-#         leaf = args[2]
-#         edited_leaves = args[3]
-#         
-#         print('\n'+ancestor+'_'+intermediate+'_'+leaf+':')
-#         outpath = nucl_mat_file
-#         print('Reading matrix')
-#         file = nucl_mat_file+intermediate+'nucl_is_A'
-#         nucl_mat=pd.read_csv(file,sep='\t',error_bad_lines=False, index_col=False, dtype='unicode')
-#         nucl_mat=nucl_mat.apply(pd.to_numeric, errors='ignore')
-#         print(str(len(nucl_mat)) + ' rows in nucl matrix')
-#         
-#         
-#         non_edited_leaves = []
-#         nucl_mat = nucl_mat[nucl_mat[intermediate+'_nuc']=="A"].copy()
-#         
-#         if ancestor_nucl is not None:
-#             if 'unrooted' in tree:
-#                 nucl_mat = nucl_mat[nucl_mat['N0_nuc']==ancestor_nucl].copy()
-#             elif 'rooted' in tree:
-#                 nucl_mat = nucl_mat[np.logical_or(nucl_mat['N1_nuc']==ancestor_nucl,nucl_mat['N0_nuc']==ancestor_nucl)].copy()
-#             
-#         hyp=Hypothesis(nucl_mat.copy(),tree_str=newick_tree_str)
-#         gm = Hypothesis.General_model(hyp)
-#         file_name='conserved_sites'+ancestor+'_'+intermediate+'_'+leaf+'_no_msa_filter'
-#         for editing_level_method in ['average','maximal','minimal']:
-#             for strong_levels in [[0.1,1],[0.15,1],[0.2,1],[0.3,1]]:
-#                 print('liberal - editing levels method: '+editing_level_method+' strong levels:'+str(strong_levels))
-#                 gm.no_depletion_factor(ancestor,intermediate,leaf,leaf_mutated_nucl,edited_leaves=edited_leaves,strong_levels=strong_levels,non_edited_leaves=non_edited_leaves,editing_level_method=editing_level_method,sites_recalculation=False)
-#         gm.general_model.write_data(outpath,file_name=file_name,data_to_write = ['no_depletion'],file_type='csv')
-#     
-#         iden_filter_cols = [col for col in nucl_mat.columns if ('aa_range' in col and leaf not in col and all([a in col for a in animals if a!=leaf ]))]
-#         print('Creating general models from C')
-#         for r in [5,10,15,20]:
-#             filter_col = [c for c in iden_filter_cols if str(r) in c][0] 
-#             for iden in [0.3,0.5,0.7]:
-#                 print('filtering '+filter_col+' for '+str(iden)+' and above')
-#                 filtered_nucl_mat = nucl_mat[nucl_mat[filter_col]>=iden]
-#                 hyp=Hypothesis(filtered_nucl_mat.copy(),tree_str=newick_tree_str)
-#                 gm = Hypothesis.General_model(hyp)
-#                 file_name='conserved_sites'+ancestor+'_'+intermediate+'_'+leaf+'_iden'+str(iden)+'_in_range'+str(r)
-#                 for editing_level_method in ['average','maximal','minimal']:
-#                     for strong_levels in [[0.1,1],[0.15,1],[0.2,1],[0.3,1]]:
-#                         print('liberal - editing levels method: '+editing_level_method+' strong levels:'+str(strong_levels))
-#                         gm.no_depletion_factor(ancestor,intermediate,leaf,leaf_mutated_nucl,strong_levels=strong_levels,edited_leaves=edited_leaves,non_edited_leaves=non_edited_leaves,editing_level_method=editing_level_method,sites_recalculation=False)
-#                 gm.general_model.write_data(outpath,file_name=file_name,data_to_write = ['no_depletion'],file_type='csv')
-# =============================================================================
+    outpath = '/'.join(nucl_mat_file.split('/')[0:-1])+'/'
+    print('\nReading matrix')
+    nucl_mat=pd.read_csv(nucl_mat_file,sep='\t',error_bad_lines=False, index_col=False, dtype='unicode')
+    nucl_mat=nucl_mat.apply(pd.to_numeric, errors='ignore')
+    print(str(len(nucl_mat)) + ' rows in nucl matrix')
+    
+    non_edited_leaves = []
+    editing_level_method='average'
+    nucl_mat = nucl_mat[nucl_mat[intermediate+'_nuc']=="A"].copy()
+    
+    if ancestor_nucl is not None:
+        if 'unrooted' in tree:
+            nucl_mat = nucl_mat[nucl_mat['N0_nuc']==ancestor_nucl].copy()
+        elif 'rooted' in tree:
+            if only_N1:
+                nucl_mat = nucl_mat[nucl_mat['N1_nuc']==ancestor_nucl].copy()
+            else:
+                nucl_mat = nucl_mat[np.logical_or(nucl_mat['N1_nuc']==ancestor_nucl,nucl_mat['N0_nuc']==ancestor_nucl)].copy()
+    
+    print('Creating  models from '+ancestor)
+    iden_filter_cols = [col for col in nucl_mat.columns if ('aa_range' in col and leaf not in col and all([a in col for a in animals if a!=leaf ]))]  
+    iden = 0.3
+    r =10
+    filter_col = [c for c in iden_filter_cols if str(r) in c][0] 
+    print('filtering '+filter_col+' for '+str(iden)+' and above')
+    filtered_nucl_mat = nucl_mat[nucl_mat[filter_col]>=iden]
+    hyp=Hypothesis(filtered_nucl_mat.copy(),tree_str=newick_tree_str)
+    model = Hypothesis.Adaptive_model(hyp)
+    file_name=ancestor+'_'+intermediate+'_'+leaf+'_iden'+str(iden)+'_in_range'+str(r)
+    
+    # strong_levels_list = [[0.05,1],[0.1,1],[0.15,1],[0.2,1]]
+    # weak_levels_list = [[0,0.01],[0,0.02],[0,0.05],[0,0.1]]
+    strong_levels_list = [[0.1,1]]
+    weak_levels_list = [[0,0.05]]
+    percentiles_list = [2.5,50,97.5]
+    
+    for strong_levels in strong_levels_list:
+        for weak_levels in weak_levels_list:
+            if strong_levels[0]>=weak_levels[1]:
+                print('Adaptive model - editing levels method: '+editing_level_method+' strong levels:'+str(strong_levels)+' weak_levels:'+str(weak_levels)+' adaptive_rate:'+str(0))
+                model.expected_mutations_distribution(ancestor,intermediate,leaf,leaf_mutated_nucl,non_edited_leaves=[],weak_levels=weak_levels,strong_levels=strong_levels,sites_recalculation=False,filter_internucl_for_edit_condition=filter_adeno_w_edit_condition,optimize_adaptive_rate=False,adaptive_rate=0.0)
+                for perc in percentiles_list:
+                    print('Adaptive model - editing levels method: '+editing_level_method+' strong levels:'+str(strong_levels)+' weak_levels:'+str(weak_levels)+'. Optimized adaptive rate for percentile '+str(perc))
+                    try:
+                        model.expected_mutations_distribution(ancestor,intermediate,leaf,leaf_mutated_nucl,non_edited_leaves=[],weak_levels=weak_levels,strong_levels=strong_levels,sites_recalculation=False,filter_internucl_for_edit_condition=filter_adeno_w_edit_condition,optimize_adaptive_rate=True,percentile=perc)
+                        model.adaptive_model.write_data(outpath,file_name=file_name,file_type='csv',data_to_write = ['adaptive'])
+                    except ValueError as e:
+                        print('Error while running adaptive model with optimizing adaptive rate mode:\n'+str(e))
+                
