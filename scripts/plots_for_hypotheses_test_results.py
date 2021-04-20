@@ -67,6 +67,20 @@ animals_names_dict={'sep':'S.ofi',
                     'S1':'S1'}
 
 
+def plot_adaptive_rates_with_con_interval(path, labels, adap_rates, yerrs):
+    fig, ax = plt.subplots()
+    x_pos = np.arange(len(labels))
+    bar_width = 0.5
+    ax.bar(x_pos, adap_rates, width=bar_width, yerr=yerrs, align='center', color='coral', capsize=2)
+    ax.set_ylabel('Fraction of adaptive sites',fontsize='13')
+    ax.set_xlabel('Evolutionary path',fontsize='13')
+    ax.set_xticks(x_pos)
+    ax.set_xticklabels(labels,rotation=90,fontsize='11')
+    plt.tight_layout()
+    plt.savefig(path+'bar_plot_with_error_bars.jpg')
+    plt.close()
+
+
 def read_fasta_to_df(trinity_file):
     """
     read relevat information from transcriptome file
@@ -85,8 +99,7 @@ def find_codon(row, a, trinity_df):
     loc_in_codon=coding_loc%3
     sequence=trinity_df.loc[row[a+'_id'].split('|')[1],'sequence']
     codon=sequence[coding_loc-loc_in_codon:coding_loc+3-loc_in_codon]
-    if list(codon).count('A')>1:
-        codon=codon+';'+str(loc_in_codon)
+    codon=codon+';'+str(loc_in_codon)
     return str(codon)
         
 
@@ -109,7 +122,7 @@ def codons_dist_dict(sites_df,trinity_dict,conserved_animals,aa_instead=False):
     return swaps_dict
     
 
-def mismatches_dist(outpath,codons_dist_dict,animals):
+def mismatches_dist(codons_dist_dict,animals):
     
     def edit_codon(codon,loc):
         codon_lst=list(codon)
@@ -140,7 +153,7 @@ def mismatches_dist(outpath,codons_dist_dict,animals):
         if len(codon_str)!=3:
             print(str(animals)+' '+codon+' is not a multiplete of 3')
 
-        data.append((str(Seq(codon).translate()),
+        data.append((str(Seq(codon_str).translate()),
                      str(Seq(edit_codon(codon_str,loc)).translate()),
                      codon_str, loc, events))
         
@@ -148,40 +161,6 @@ def mismatches_dist(outpath,codons_dist_dict,animals):
     sorted_df=df.sort_values(['original_aa','codon','nucl'],ascending=[True,True,True])
     return sorted_df
 
-def plot_mm_dist(df,outpath,title):
-
-        width=0.2
-        sorted_df=df.sort_values(['original_aa','codon','nucl'],ascending=[True,True,True])
-        sorted_df['editing_in_codon']=sorted_df.apply(lambda row: row['codon']+';'+str(row['nucl']+1)+'>'+row['target_aa'], axis=1)
-        fig, ax = plt.subplots(figsize=(20, 10))
-        swaps=list(sorted_df['editing_in_codon'].values)
-        events = list(sorted_df[title+'_events'].values)
-        values = [x/sum(events) for x in events]
-        plt.bar(swaps,values,width=width)
-        plt.xticks(np.arange(len(swaps)),swaps,rotation=90)   
-        plt.ylabel('Mismatch fraction')
-        aas=sorted(list(set(list(sorted_df['original_aa'].values))))
-        ticks=ax.get_xticks()
-
-        j=0
-        k=0
-        ticks_vals = list(enumerate(ticks))
-        trans = ax.get_xaxis_transform()
-        for i,t in ticks_vals:
-            if i==j:
-                aa=aas[k]
-                ticks_n=len(sorted_df[sorted_df['original_aa']==aa])
-                last_tick_for_aa=ticks_vals[i+ticks_n-1]
-                plt.text((t+float(ticks_n-1)/2-0.15),-0.15,aa,size=10,transform=trans)    
-                plt.plot([t-0.30,last_tick_for_aa[1]+0.25],[-0.13,-0.13],color = 'black',transform=trans,clip_on=False)        
-                j+=ticks_n
-                k+=1
-            else:
-                pass
-
-        plt.savefig(outpath+title+'_codons_dist.jpg')
-        plt.close()
-        
         
 def plot_mm_dist_for_multiple_animals(df,outpath,title,animals):
 
@@ -688,8 +667,8 @@ def collect_results_for_hpm_and_plot_probs(path,animals,conserved_groups=None):
 
     #editing levels by types
     el_by_types_dict={}
-    for f in glob.glob(path+'editing_levels_by_type*'):
-        name=f.split('\\')[-1].replace('editing_levels_by_types_','')
+    for f in glob.glob(path+'editing_levels_distribution_by_type_*'):
+        name=f.split('\\')[-1].replace('editing_levels_distribution_by_type_','')
         try:
             s = pd.read_csv(f, sep='\t', index_col=0, header=None, squeeze=True)
         except pd.errors.EmptyDataError:
@@ -936,9 +915,9 @@ def calc_dn_ds():
     print(str(ds/(dn+ds)))
 
 
-def create_tree_relations_dicts(tree_str, is_str=True):
+def create_tree_relations_dicts(tree_str):
     
-    if is_str:
+    if type(tree_str) is str:
         tree = Phylo.read(StringIO(tree_str), "newick")
     else:
         tree = tree_str
@@ -977,25 +956,6 @@ def create_tree_relations_dicts(tree_str, is_str=True):
     
     return tree, leaves_to_ancestors_dict, ancestors_to_leaves_dict, ancestors_to_downstream_ancestors_dict, ancestors_to_upstream_ancestors_dict
                 
-   
-def plt_excess_of_unmutated_sites():
-    
-    plt.rcdefaults()
-    fig, ax = plt.subplots()
-    
-    # Example data
-    tests = ('D to sep', 'D to squ', 'D to bob', 'D to lin', 'S to sep', 'S to squ', 'B to bob', 'B to lin')
-    y_pos = np.arange(len(tests))
-    performance = [2.32619168,2.217906721,1.909488396,3.744631838,7.626306551,1.757157595,0.471189566,-0.164851777]
-    ax.barh(y_pos, performance, align='center')
-    ax.set_yticks(y_pos)
-    ax.set_yticklabels(tests)
-    ax.set_xlim(-2,8)
-    ax.invert_yaxis()  # labels read top-to-bottom
-    ax.set_xlabel('Excess of unmutated sites\n(expected mut. - actual mut.)')
-    plt.axvline(x=0, color='black',linestyle='--')
-    plt.show()
-    plt.close()
        
 
 def plot_conserved_sites_substitutions(path,rates):
@@ -1245,7 +1205,7 @@ def calc_substitutions_per_editing_type(sites_df,levels_ranges,intermediate,anim
 def get_all_groups_of_edited_sites(tree_str,ancestor,animals=['oct','bim','sep','squ','lin','bob'],rooted=True):
 
     tree = Phylo.read(StringIO(tree_str), "newick")
-    leaves_to_ancestors_dict, ancestors_to_leaves_dict, ancestors_to_downstream_ancestors_dict, ancestors_to_upstream_ancestors_dict = create_tree_relations_dicts(tree) 
+    tree, leaves_to_ancestors_dict, ancestors_to_leaves_dict, ancestors_to_downstream_ancestors_dict, ancestors_to_upstream_ancestors_dict = create_tree_relations_dicts(tree) 
     edited_leaves = []
     for c in list(it.combinations(animals,2)):
         common_ances = tree.common_ancestor(c).name
@@ -1476,79 +1436,89 @@ if __name__=='__main__':
     
 
     
-# =============================================================================
-#     animals=['oct','bim','sep','squ','bob','lin']
-#     conserved_groups = ['bim_oct','sep_squ','bob_lin','bob_lin_sep_squ','bim_bob_lin_oct_sep_squ']
-#     path = 'D:/RNA_Editing_large_files_Backup_20201205/Phylogeny/results/Raxml/all8/hpm_cephalopods_ancestry/'    
-#     rates_df, el_df = collect_results_for_hpm_and_plot_probs(path,animals,conserved_groups)      
-#     
-#     animals=['oct','bim','sep','squ','bob','lin']
-#     conserved_groups = ['bim_oct','lin_sep','bob_lin_sep','bob_lin_sep_squ','bim_bob_lin_oct_sep_squ']
-#     path = 'D:/RNA_Editing_large_files_Backup_20201205/Phylogeny/results/NCBI/all8/hpm_cephalopods_ancestry_aa/'    
-#     rates_df, el_df = collect_results_for_hpm_and_plot_probs(path,animals,conserved_groups)  
-# 
-#     animals=['oct','bim','sep','squ','bob','lin']
-#     conserved_groups = ['bim_oct','lin_squ','bob_lin_squ','bob_lin_sep_squ','bim_bob_lin_oct_sep_squ']
-#     path = 'D:/RNA_Editing_large_files_Backup_20201205/Phylogeny/results/oleg/all8/'
-#     rates_df, el_df = collect_results_for_hpm_and_plot_probs(path,animals,conserved_groups)  
-# =============================================================================
+    animals=['oct','bim','sep','squ','bob','lin']
+    # conserved_groups = ['bim_oct','sep_squ','bob_lin','bob_lin_sep_squ','bim_bob_lin_oct_sep_squ']
+    conserved_groups=None
+    path = 'D:/RNA_Editing_large_files_Backup_20201205/Phylogeny/Results_fixed/oleg_tree/all8/hpm/'    
+    rates_df, el_df = collect_results_for_hpm_and_plot_probs(path,animals,conserved_groups)      
     
-    path = 'D:/RNA_Editing_large_files_Backup_20201205/Phylogeny/results/oleg/coleoids_adaptive/'
+    animals=['oct','bim','sep','squ','bob','lin']
+    # conserved_groups = ['bim_oct','lin_sep','bob_lin_sep','bob_lin_sep_squ','bim_bob_lin_oct_sep_squ']
+    conserved_groups=None
+    path = 'D:/RNA_Editing_large_files_Backup_20201205/Phylogeny/Results_fixed/ncbi_tree/all8/hpm/'    
+    rates_df, el_df = collect_results_for_hpm_and_plot_probs(path,animals,conserved_groups)  
+
+    animals=['oct','bim','sep','squ','bob','lin']
+    # conserved_groups = ['bim_oct','lin_squ','bob_lin_squ','bob_lin_sep_squ','bim_bob_lin_oct_sep_squ']
+    conserved_groups=None
+    path = 'D:/RNA_Editing_large_files_Backup_20201205/Phylogeny/Results_fixed/raxml_tree/all8/hpm/'    
+    rates_df, el_df = collect_results_for_hpm_and_plot_probs(path,animals,conserved_groups)  
+    
+    
+    path = 'D:/RNA_Editing_large_files_Backup_20201205/Phylogeny/Results_fixed/oleg_tree/coleoids/adaptive/'
     results_dfs_dict = collect_results_for_general_model_and_plot_probs(path, recalc=True)
     
-    # path = 'D:/RNA_Editing_large_files_Backup_20201205/Phylogeny/results/NCBI/coleoids/new_res/'
-    # results_dfs_dict = collect_results_for_general_model_and_plot_probs(path, recalc=True)
+    path = 'D:/RNA_Editing_large_files_Backup_20201205/Phylogeny/Results_fixed/ncbi_tree/coleoids/adaptive/'
+    results_dfs_dict = collect_results_for_general_model_and_plot_probs(path, recalc=True)
 
-    # path = 'D:/RNA_Editing_large_files_Backup_20201205/Phylogeny/results/Raxml/coleoids/new_res_adaptive/'
-    # results_dfs_dict = collect_results_for_general_model_and_plot_probs(path, recalc=True)
+    path = 'D:/RNA_Editing_large_files_Backup_20201205/Phylogeny/Results_fixed/raxml_tree/coleoids/adaptive/'
+    results_dfs_dict = collect_results_for_general_model_and_plot_probs(path, recalc=True)
 
 
-    # trinity_files_path='D:/RNA_Editing_large_files_Backup_20201205/transcriptomes_fix/trinity_transcriptomes/our_fix/native_coding_mrna/'
-    # animals=['apl','nau','oct', 'bim', 'sep', 'squ', 'lin', 'bob']
-    # print('Reading all transcripts from fasta files')
-    # trinity_dict = {}
-    # for a in animals:
-    #     trinity_df = read_fasta_to_df(trinity_files_path+'native_coding_mrna_orfs_'+a+'.fa')
-    #     trinity_df.set_index('id', inplace=True)
-    #     trinity_dict.update({a:trinity_df})
-        
-    
-    # print('Reading sites file')
-    # sites_path = 'D:/RNA_Editing_large_files_Backup_20201205/Phylogeny/results/Raxml/coleoids/edited_rows_coleoids'
-    # sites_df = pd.read_csv(sites_path,sep='\t',index_col=False)
-    # conserved_sets=[('oct',),('bim',),('sep',),('squ',),('bob',),('lin',),
-    #                 ('oct','bim'),('sep','squ','bob','lin'),
-    #                 ('oct','bim','sep','squ','bob','lin')]
-    # outpath= '/'.join(sites_path.split('/')[:-1])+'/codons_dists/'
-    # if not os.path.exists(outpath):
-    #     os.makedirs(outpath)
-    
-    # codons_dists_res={}
-    # for s in conserved_sets:
-    #     print('Calculating codons distributions for '+str(s))
-    #     codons_dists_res.update({s:codons_dist_dict(sites_df,trinity_dict,s,aa_instead=False)})
+# =============================================================================
+#     trinity_files_path='D:/RNA_Editing_large_files_Backup_20201205/transcriptomes_fix/trinity_transcriptomes/our_fix/native_coding_mrna/'
+#     animals=['apl','nau','oct', 'bim', 'sep', 'squ', 'lin', 'bob']
+#     print('Reading all transcripts from fasta files')
+#     trinity_dict = {}
+#     for a in animals:
+#         trinity_df = read_fasta_to_df(trinity_files_path+'native_coding_mrna_orfs_'+a+'.fa')
+#         trinity_df.set_index('id', inplace=True)
+#         trinity_dict.update({a:trinity_df})
+#         
+#     
+#     print('Reading sites file')
+#     sites_path = 'D:/RNA_Editing_large_files_Backup_20201205/Phylogeny/Results_fixed/raxml_tree/coleoids/edited_rows'
+#     sites_df = pd.read_csv(sites_path,sep='\t',index_col=False)
+#     conserved_sets=[('oct',),('bim',),('sep',),('squ',),('bob',),('lin',),]
+#     outpath= '/'.join(sites_path.split('/')[:-1])+'/edited_codons_dists/'
+#     if not os.path.exists(outpath):
+#         os.makedirs(outpath)
+#     
+#     codons_dists_res={}
+#     for s in conserved_sets:
+#         print('Calculating codons distributions for '+str(s))
+#         codons_dists_res.update({s:codons_dist_dict(sites_df,trinity_dict,s,aa_instead=False)})
+# 
+#     dists={}
+#     for k,v in codons_dists_res.items():
+#         print('Creating full table for '+str(k))
+#         title='_'.join(k)
+#         mm_df=mismatches_dist(v, k)
+#         mm_df['editing']=mm_df.apply(lambda row: row['codon']+';'+str(row['nucl']),axis=1)
+#         mm_df.set_index('editing', inplace=True)
+#         dists.update({k:mm_df})
+#       
+#     animals=['oct', 'bim', 'sep', 'squ', 'lin', 'bob']
+#     print('merging tables for '+str(animals))
+#     df_final=dists[(animals[0],)].copy()
+#     df_final.rename(columns={animals[0]+'_events':animals_names_dict[animals[0]]}, inplace=True)
+#     for a in animals[1:]:
+#         df_final[animals_names_dict[a]]=dists[(a,)][a+'_events']
+#     df_final.to_excel(outpath+'edited_codons.xlsx', index=False)
+#     title='edited_codons_dist'
+#     plot_mm_dist_for_multiple_animals(df_final,outpath,title,[animals_names_dict[a] for a in animals])
+# =============================================================================
 
-    # dists={}
-    # for k,v in codons_dists_res.items():
-    #     print('Creating full table for '+str(k))
-    #     title='_'.join(k)
-    #     mm_df=mismatches_dist(outpath, v, title)
-    #     mm_df['editing']=mm_df.apply(lambda row: row['codon']+';'+str(row['nucl']),axis=1)
-    #     mm_df.set_index('editing', inplace=True)
-    #     dists.update({k:mm_df})
-    
-    # animals=['oct', 'bim', 'sep', 'squ', 'lin', 'bob']
-    # print('merging tables for '+str(animals))
-    # df_final=dists[(animals[0],)]
-    # df_final.rename(columns={animals[0]+'_events':animals_names_dict[animals[0]]}, inplace=True)
-    # for a in animals[1:]:
-    #     df_final[animals_names_dict[a]]=dists[(a,)][a+'_events']
-    # df_final.to_excel(outpath+'edited_codons.xlsx', index=False)
-    # title='edited_codons_dist'
-    # plot_mm_dist_for_multiple_animals(df_final,outpath,title,[animals_names_dict[a] for a in animals])
-    
-    
-    
+    path = 'D:/RNA_Editing_large_files_Backup_20201205/Phylogeny/Results_fixed/raxml_tree/coleoids/'
+    labels = ['B > Eup', 'B > S.lin', 'D > Eup', 'D > S.lin', 'D > S.ofi', 'D > D.pea', 'S > S.ofi', 'S > D.pea']
+    adap_rates = [0.122718219960006, 0.229163853191494, 0.11395620366784, 0.264403820037842, 0.339698860485441,
+                  0.187042234460023, 0.410480676104271, 0.140008278138339]
+    yerr_low = [0.04032300340441, 0.120587728639293, 0.0, 0.120738359199095, 0.178207397460937, 0.0, 0.338226791694979,
+                0.0414647300440265]
+    yerr_high = [0.199432372113733, 0.325771325731694, 0.240252049885385, 0.387245467003595, 0.471588385293217,
+                 0.348747131587516, 0.475046138226389, 0.229241007908058]
+    yerrs = np.array([[adap_rates[i] - x for i, x in enumerate(yerr_low)], [x - adap_rates[i] for i, x in enumerate(yerr_high)]])
+    plot_adaptive_rates_with_con_interval(path, labels, adap_rates, yerrs)
     
         
         
@@ -1561,7 +1531,7 @@ if __name__=='__main__':
     
     
 # =============================================================================
-#     s = "O.vult19956t681198t36527t1651609\nO.bimt12868t687196t23751t1664678\nS.ofit21942t650796t41986t1594042\nD.peat13816t684107t25836t1637114\nEupt8716t668266t16140t1651819\nS.lint16327t675324t29367t1621529\n"
+#     s = "O.vult15433t681198t27162t1651609\nO.bimt8865t687196t15421t1664678\nS.ofit16425t650796t30411t1594042\nD.peat8244t684107t14100t1637114\nEupt4987t668266t8576t1651819\nS.lint10136t675324t17803t1621529\n"
 #     rows = s.split('\n')
 #     rows=rows[:-1]
 #     data=[]
@@ -1584,13 +1554,13 @@ if __name__=='__main__':
 #         rates.append((syn_r,nonsyn_r))
 #         errs.append((syn_err,nonsyn_err))
 #         
-#     outpath = 'E:/RNA_editing_Large_files/Phylogeny/results/coleoids/our_model/rooted/'
+#     outpath = 'D:/RNA_Editing_large_files_Backup_20201205/Phylogeny/Results_fixed/raxml_tree/coleoids/'
 #     plot_nonsyn_to_syn_depletions(animals, rates, errs, outpath)
 # =============================================================================
     
     
 # =============================================================================
-#     trinity_files_path='C:/Users/shosh/OneDrive/Desktop/RNA_Editing_large_files_Backup_20200906/transcriptomes_fix/trinity_transcriptomes/our_fix/new_native_transcriptomes/'
+#     trinity_files_path='C:/Users/shosh/Google_Drive/adaptive recoding in cephalopods/new_native_transcriptomes/'
 #     animals=['apl','nau','oct', 'bim', 'sep', 'squ', 'lin', 'bob']
 #     print('Reading all transcripts from fasta files')
 #     trinity_dict = {}
@@ -1599,15 +1569,15 @@ if __name__=='__main__':
 #         trinity_df.set_index('id', inplace=True)
 #         trinity_dict.update({a:trinity_df})
 #     
-#     path = 'C:/Users/shosh/OneDrive/Desktop/RNA_Editing_large_files_Backup_20200906/Phylogeny/results/Sanchez/coleoids/edited_rows_coleoids'
-#     tree_str = trees['coleoids_rooted']
-#     print("Processing table for \n"+tree_str)
-#     animals=['oct', 'bim', 'sep', 'squ', 'lin', 'bob']
-#     ancestors=['C','O','D','B','S']
-#     df_coleoids=reorganize_sites_data(path,animals,ancestors,tree_str,trinity_dict)
+#     # path = 'D:/RNA_Editing_large_files_Backup_20201205/Phylogeny/Results_fixed/raxml_tree/coleoids/edited_rows'
+#     # tree_str = trees['coleoids_rooted_raxml']
+#     # print("Processing table for \n"+tree_str)
+#     # animals=['oct', 'bim', 'sep', 'squ', 'lin', 'bob']
+#     # ancestors=['C','O','D','B','S']
+#     # df_coleoids=reorganize_sites_data(path,animals,ancestors,tree_str,trinity_dict)
 #     
-#     path = 'C:/Users/shosh/OneDrive/Desktop/RNA_Editing_large_files_Backup_20200906/Phylogeny/results/Sanchez/all8/edited_rows_all8'
-#     tree_str = trees['all8_rooted']
+#     path = 'D:/RNA_Editing_large_files_Backup_20201205/Phylogeny/Results_fixed/raxml_tree/all8/edited_rows'
+#     tree_str = trees['all8_rooted_raxml']
 #     print("Processing table for \n"+tree_str)
 #     animals=['apl','nau','oct', 'bim', 'sep', 'squ', 'lin', 'bob']
 #     ancestors=['N0','N1','C','O','D','B','S']
@@ -1655,56 +1625,54 @@ if __name__=='__main__':
 # =============================================================================
     
     
-# =============================================================================
-#     # params_groups = [
-#     #                  ('C',([0,0.1],[0.1,1],[0,1]),[('sep','oct'),('sep','bim'),('squ','oct'),('squ','bim'),('bob','oct'),('bob','bim'),('lin','oct'),('lin','bim')],['sep','squ','bob','lin','oct','bim'],'all8_rooted',
-#     #                  'C:/Users/shosh/OneDrive/Desktop/RNA_Editing_large_files_Backup_20200906/Phylogeny/results/Sanchez/non_neural/4fold/edited_rows_from_4fold_non_neural_subset','non_neural'),
-#     #                  ('C',([0,0.1],[0.1,1],[0,1]),[('sep','oct'),('sep','bim'),('squ','oct'),('squ','bim'),('bob','oct'),('bob','bim'),('lin','oct'),('lin','bim')],['sep','squ','bob','lin','oct','bim'],'all8_rooted',
-#     #                  'C:/Users/shosh/OneDrive/Desktop/RNA_Editing_large_files_Backup_20200906/Phylogeny/results/Sanchez/neural/4fold/edited_rows_from_4fold_neural_subset','neural')
-#                      
-#     #                  ]
-# 
-#     params_groups = [
-#                      ('C',([0,0.1],[0.1,1],[0,1]),[('sep','oct'),('sep','bim'),('squ','oct'),('squ','bim'),('bob','oct'),('bob','bim'),('lin','oct'),('lin','bim')],['sep','squ','bob','lin','oct','bim'],'all8_rooted_ncbi',
-#                       'D:/RNA_Editing_large_files_Backup_20201205/Phylogeny/results/Raxml/all8/edited_rows','raxml'),
-#         
-#                      ('C',([0,0.1],[0.1,1],[0,1]),[('sep','oct'),('sep','bim'),('squ','oct'),('squ','bim'),('bob','oct'),('bob','bim'),('lin','oct'),('lin','bim')],['sep','squ','bob','lin','oct','bim'],'all8_rooted_oleg',
-#                      'D:/RNA_Editing_large_files_Backup_20201205/Phylogeny/results/NCBI/all8/edited_rows','oleg'),
-#                      
-#                      ('C',([0,0.1],[0.1,1],[0,1]),[('sep','oct'),('sep','bim'),('squ','oct'),('squ','bim'),('bob','oct'),('bob','bim'),('lin','oct'),('lin','bim')],['sep','squ','bob','lin','oct','bim'],'all8_rooted_ncbi',
-#                       'D:/RNA_Editing_large_files_Backup_20201205/Phylogeny/results/oleg/all8/edited_rows','ncbi')
-#                      ]
-# 
-#     
-#     results = []
-#     conserved_sites_subs_dict = {}
-#     for param in params_groups:
-#         
-#         intermediate = param[0] 
-#         levels_ranges = param[1]
-#         edited_leaves = param[2]
-#         animals_to_check_subs=param[3]
-#         tree=param[4]
-#         path=param[5]
-#         params_name=param[6]
-#         df = pd.read_csv(path,sep='\t',index_col=False)
-#         non_edited_leaves = []
-#         df_for_intermediate = df[df[intermediate+'_nuc']=="A"]
-#         relevant_es = collect_editing_sites(df_for_intermediate, edited_leaves, non_edited_leaves, editing_level_method='average')
-#         print(str(len(relevant_es[relevant_es['N1_nuc']=='A'])) + ' N1 ancestralA')
-#         print(str(len(relevant_es[relevant_es['N1_nuc']=='G'])) + ' N1 ancestralG')
-#         print(str(len(relevant_es[relevant_es['N1_nuc']=='C'])) + ' N1 ancestralC')
-#         print(str(len(relevant_es[relevant_es['N1_nuc']=='T'])) + ' N1 ancestralT')
-#         sites_df, rates,data_df = calc_substitutions_per_ancestral_nucl(relevant_es,levels_ranges,intermediate,animals_to_check_subs,count_subs_multiple_times=False)
-#         sites_df, rates, data_df = calc_substitutions_per_editing_type(relevant_es,levels_ranges,intermediate,animals_to_check_subs,count_subs_multiple_times=False)
-#         
-#         results.append(rates)
-#         outpath = '/'.join(path.split('/')[:-1])+'/'
-#         name = 'subs_from_'+intermediate
-#         data_df.to_excel(path+name+'.xlsx', index=False)
-#         plot_substitutions_by_type(outpath,rates[2][1])
-#         conserved_sites_subs_dict.update({params_name:data_df})
-# =============================================================================
+    # params_groups = [
+    #                  ('C',([0,0.1],[0.1,1],[0,1]),[('sep','oct'),('sep','bim'),('squ','oct'),('squ','bim'),('bob','oct'),('bob','bim'),('lin','oct'),('lin','bim')],['sep','squ','bob','lin','oct','bim'],'all8_rooted',
+    #                  'C:/Users/shosh/OneDrive/Desktop/RNA_Editing_large_files_Backup_20200906/Phylogeny/results/Sanchez/non_neural/4fold/edited_rows_from_4fold_non_neural_subset','non_neural'),
+    #                  ('C',([0,0.1],[0.1,1],[0,1]),[('sep','oct'),('sep','bim'),('squ','oct'),('squ','bim'),('bob','oct'),('bob','bim'),('lin','oct'),('lin','bim')],['sep','squ','bob','lin','oct','bim'],'all8_rooted',
+    #                  'C:/Users/shosh/OneDrive/Desktop/RNA_Editing_large_files_Backup_20200906/Phylogeny/results/Sanchez/neural/4fold/edited_rows_from_4fold_neural_subset','neural')
+                     
+    #                  ]
+
+    params_groups = [
+                     ('C',([0,0.1],[0.1,1],[0,1]),[('sep','oct'),('sep','bim'),('squ','oct'),('squ','bim'),('bob','oct'),('bob','bim'),('lin','oct'),('lin','bim')],['sep','squ','bob','lin','oct','bim'],'all8_rooted_ncbi',
+                      'D:/RNA_Editing_large_files_Backup_20201205/Phylogeny/Results_fixed/raxml_tree/all8/edited_rows','raxml'),
+        
+                     ('C',([0,0.1],[0.1,1],[0,1]),[('sep','oct'),('sep','bim'),('squ','oct'),('squ','bim'),('bob','oct'),('bob','bim'),('lin','oct'),('lin','bim')],['sep','squ','bob','lin','oct','bim'],'all8_rooted_oleg',
+                     'D:/RNA_Editing_large_files_Backup_20201205/Phylogeny/Results_fixed/oleg_tree/all8/edited_rows','oleg'),
+                     
+                     ('C',([0,0.1],[0.1,1],[0,1]),[('sep','oct'),('sep','bim'),('squ','oct'),('squ','bim'),('bob','oct'),('bob','bim'),('lin','oct'),('lin','bim')],['sep','squ','bob','lin','oct','bim'],'all8_rooted_ncbi',
+                      'D:/RNA_Editing_large_files_Backup_20201205/Phylogeny/Results_fixed/ncbi_tree/all8/edited_rows','ncbi')
+                     ]
+
+    
+    results = []
+    conserved_sites_subs_dict = {}
+    for param in params_groups:
+        
+        intermediate = param[0] 
+        levels_ranges = param[1]
+        edited_leaves = param[2]
+        animals_to_check_subs=param[3]
+        tree=param[4]
+        path=param[5]
+        params_name=param[6]
+        df = pd.read_csv(path,sep='\t',index_col=False)
+        non_edited_leaves = []
+        df_for_intermediate = df[df[intermediate+'_nuc']=="A"]
+        relevant_es = collect_editing_sites(df_for_intermediate, edited_leaves, non_edited_leaves, editing_level_method='average')
+        print(str(len(relevant_es[relevant_es['N1_nuc']=='A'])) + ' N1 ancestralA')
+        print(str(len(relevant_es[relevant_es['N1_nuc']=='G'])) + ' N1 ancestralG')
+        print(str(len(relevant_es[relevant_es['N1_nuc']=='C'])) + ' N1 ancestralC')
+        print(str(len(relevant_es[relevant_es['N1_nuc']=='T'])) + ' N1 ancestralT')
+        sites_df, rates,data_df = calc_substitutions_per_ancestral_nucl(relevant_es,levels_ranges,intermediate,animals_to_check_subs,count_subs_multiple_times=False)
+        sites_df, rates, data_df = calc_substitutions_per_editing_type(relevant_es,levels_ranges,intermediate,animals_to_check_subs,count_subs_multiple_times=False)
+        
+        results.append(rates)
+        outpath = '/'.join(path.split('/')[:-1])+'/'
+        name = 'subs_from_'+intermediate
+        data_df.to_excel(path+name+'.xlsx', index=False)
+        plot_substitutions_by_type(outpath,rates[2][1])
+        conserved_sites_subs_dict.update({params_name:data_df})
  
     
     

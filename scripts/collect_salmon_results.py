@@ -143,7 +143,7 @@ if __name__=='__main__':
             
         salmon_quant_path = 'D:/RNA_Editing_large_files_Backup_20201205/SALMON/quant/'
         sra_metadata_tbl = 'D:/RNA_Editing_large_files_Backup_20201205/SALMON/SraRunTable.txt'
-        sites_tbl = 'D:/RNA_Editing_large_files_Backup_20201205/Phylogeny/results/Raxml/coleoids/edited_rows_coleoids'
+        sites_tbl = 'D:/RNA_Editing_large_files_Backup_20201205/Phylogeny/Results_fixed/raxml_tree/coleoids/edited_rows'
         out_dir = '/'.join(sra_metadata_tbl.split('/')[:-1])+'/classifications_per_tissue_type/'
         non_neural_per_neural = 1
     
@@ -204,7 +204,7 @@ if __name__=='__main__':
         final_tbl_only_tpm_averaged_reduced=final_tbl_only_tpm_averaged.loc[list(set(list(sites_df['bim_id'].values))),:].copy()
         
         tpm_rnage=0.1
-        for x in [1.5,2,2.5,3,4,5,7,10]:
+        for x in [4]:
             
             print('\n\nTesting for '+str(x)+'-fold')
             #collect neural genes and sites based on x-fold expression

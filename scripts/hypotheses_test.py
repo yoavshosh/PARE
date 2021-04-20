@@ -553,7 +553,7 @@ class Hypothesis:
             
             
             
-        def collect_editing_levels_distributions_by_types(self, leaves, leaf_original_nucl='A', leaf_target_nucl='G', ancestors=None, editing_level_method='average'):
+        def collect_editing_levels_distributions_by_types(self, leaves, leaf_original_nucl='A', leaf_target_nucl='G', ancestors=None, editing_level_method='average',exclude_ancestry=['N0']):
             
             if ancestors is None:
                 if type(leaves) is str:
@@ -565,7 +565,7 @@ class Hypothesis:
                 name=leaves
                 self.hpm.collect_editing_sites(edited_leaves=[(leaves,)],non_edited_leaves=[],editing_level_method=editing_level_method)
                 mat=self.hpm.edited.copy()
-                mat[leaves+'_editing_type']=mat.apply(lambda row: self.determine_editing_type(row,ancestors,leaves,leaf_original_nucl=leaf_original_nucl,leaf_target_nucl=leaf_target_nucl),axis=1)
+                mat[leaves+'_editing_type']=mat.apply(lambda row: self.determine_editing_type(row,ancestors,leaves,leaf_original_nucl=leaf_original_nucl,leaf_target_nucl=leaf_target_nucl,exclude_ancestry=exclude_ancestry),axis=1)
                 self.hpm.hpm_data['editing_levels_distribution_by_type'].update({name+'_syn':mat[mat[leaves+'_editing_type']=='syn'][leaves+'_editing_level']})
                 self.hpm.hpm_data['editing_levels_distribution_by_type'].update({name+'_res':mat[mat[leaves+'_editing_type']=='res'][leaves+'_editing_level']})
                 self.hpm.hpm_data['editing_levels_distribution_by_type'].update({name+'_div':mat[mat[leaves+'_editing_type']=='div'][leaves+'_editing_level']})
@@ -577,7 +577,7 @@ class Hypothesis:
                 name='_'.join(sorted(leaves))
                 self.hpm.collect_editing_sites(edited_leaves=[leaves],non_edited_leaves=[],editing_level_method=editing_level_method)
                 mat=self.hpm.edited.copy()
-                mat['editing_type'] = mat.apply(lambda row: self.determine_editing_type_for_multiple_leaves(row,leaves,leaf_original_nucl=leaf_original_nucl,leaf_target_nucl=leaf_target_nucl), axis=1)
+                mat['editing_type'] = mat.apply(lambda row: self.determine_editing_type_for_multiple_leaves(row,leaves,leaf_original_nucl=leaf_original_nucl,leaf_target_nucl=leaf_target_nucl,exclude_ancestry=exclude_ancestry), axis=1)
                 self.hpm.hpm_data['editing_levels_distribution_by_type'].update({name+'_syn':mat[mat['editing_type']=='syn']['combined_editing_level']})
                 self.hpm.hpm_data['editing_levels_distribution_by_type'].update({name+'_res':mat[mat['editing_type']=='res']['combined_editing_level']})
                 self.hpm.hpm_data['editing_levels_distribution_by_type'].update({name+'_div':mat[mat['editing_type']=='div']['combined_editing_level']})
@@ -586,7 +586,7 @@ class Hypothesis:
                 self.hpm.hpm_data['editing_levels_distribution_by_type'].update({name+'_specific_div':mat[np.logical_and(mat['editing_type']=='div',mat['edited_animals']==len(leaves))]['combined_editing_level']})       
             
             
-        def calc_editing_types_rates(self, leaves, leaf_original_nucl='A', leaf_target_nucl='G', ancestors=None, editing_levels=[0,1]):
+        def calc_editing_types_rates(self, leaves, leaf_original_nucl='A', leaf_target_nucl='G', ancestors=None, editing_levels=[0,1], exclude_ancestry=['N0']):
             
             if ancestors is None:
                 if type(leaves) is str:
@@ -600,7 +600,7 @@ class Hypothesis:
             
                 name=leaves+'_editing_level_'+str(editing_levels[0])+'-'+str(editing_levels[1])
                 mat = mat[mat[leaves+'_nuc']==leaf_original_nucl].copy()
-                mat[leaves+'_editing_type'] = mat.apply(lambda row: self.determine_editing_type(row,ancestors,leaves,leaf_original_nucl=leaf_original_nucl,leaf_target_nucl=leaf_target_nucl),axis=1)
+                mat[leaves+'_editing_type'] = mat.apply(lambda row: self.determine_editing_type(row,ancestors,leaves,leaf_original_nucl=leaf_original_nucl,leaf_target_nucl=leaf_target_nucl,exclude_ancestry=exclude_ancestry),axis=1)
                 edited=mat[mat[leaves+'_edited']==1].copy()
                 edited = edited[np.logical_and(edited[leaves+'_editing_level']>editing_levels[0],edited[leaves+'_editing_level']<=editing_levels[1])]
                 
@@ -619,7 +619,7 @@ class Hypothesis:
                 common_ances = self.hpm.tree.common_ancestor(leaves).name
                 mat = mat[mat[common_ances+'_nuc']==leaf_original_nucl].copy()
                 name='_'.join(sorted(leaves))+'_editing_level_'+str(editing_levels[0])+'-'+str(editing_levels[1])
-                mat['editing_type'] = mat.apply(lambda row: self.determine_editing_type_for_multiple_leaves(row,leaves,leaf_original_nucl=leaf_original_nucl,leaf_target_nucl=leaf_target_nucl), axis=1)
+                mat['editing_type'] = mat.apply(lambda row: self.determine_editing_type_for_multiple_leaves(row,leaves,leaf_original_nucl=leaf_original_nucl,leaf_target_nucl=leaf_target_nucl,exclude_ancestry=exclude_ancestry), axis=1)
                 edited=mat
                 for l in leaves:
                     edited=edited[edited[l+'_edited']==1].copy()
@@ -639,46 +639,7 @@ class Hypothesis:
             self.hpm.hpm_data['editing_types_rates'].update({name:pd.Series(data=(syn_edited,specie_specific_syn_edited,syn,res_edited,specie_specific_res_edited,res,div_edited,specie_specific_div_edited,div),
                                                                       index=('syn_edited','specie_specific_syn_edited','syn','res_edited','specie_specific_res_edited','res','div_edited','specie_specific_div_edited','div'), name=name)})
             
-                 
-        
-        def count_editing_types(self, leaves, leaf_original_nucl='A', leaf_target_nucl='G', ancestors=None):
-                
-            if ancestors is None:
-                if type(leaves) is str:
-                    ancestors=self.hpm.leaves_to_ancestors_dict[leaves]
-                if type(leaves) in [list,tuple]:
-                    ancestors=list(reduce(set.intersection, [set(ances) for l,ances in self.hpm.leaves_to_ancestors_dict.items() if l in leaves]))
-                             
-            mat=self.hpm.nucl_mat
-            if type(leaves) is str:
-                name=leaves
-                mat=mat[mat[leaves+'_edited']==1].copy()
-                mat[leaves+'_editing_type']=mat.apply(lambda row: self.determine_editing_type(row,ancestors,leaves,leaf_original_nucl=leaf_original_nucl,leaf_target_nucl=leaf_target_nucl),axis=1)
-                syn_n = len(mat[mat[leaves+'_editing_type']=='syn'])
-                res_n = len(mat[mat[leaves+'_editing_type']=='res'])
-                div_n = len(mat[mat[leaves+'_editing_type']=='div'])
-                specie_specific_syn_n = len(mat[np.logical_and(mat[leaves+'_editing_type']=='syn',mat['edited_animals']==1)])
-                specie_specific_res_n = len(mat[np.logical_and(mat[leaves+'_editing_type']=='res',mat['edited_animals']==1)])
-                specie_specific_div_n = len(mat[np.logical_and(mat[leaves+'_editing_type']=='div',mat['edited_animals']==1)])
-                
-            elif type(leaves) in [list,tuple]: 
-                name='_'.join(sorted(leaves))
-                for l in leaves:
-                    mat=mat[mat[l+'_edited']==1].copy()
-                mat['editing_type'] = mat.apply(lambda row: self.determine_editing_type_for_multiple_leaves(row,leaves,leaf_original_nucl=leaf_original_nucl,leaf_target_nucl=leaf_target_nucl), axis=1)
-                syn_n = len(mat[mat['editing_type']=='syn'])
-                res_n = len(mat[mat['editing_type']=='res'])
-                div_n = len(mat[mat['editing_type']=='div'])
-                specie_specific_syn_n=len(mat[np.logical_and(mat['editing_type']=='syn',mat['edited_animals']==len(leaves))])
-                specie_specific_res_n=len(mat[np.logical_and(mat['editing_type']=='res',mat['edited_animals']==len(leaves))])
-                specie_specific_div_n=len(mat[np.logical_and(mat['editing_type']=='div',mat['edited_animals']==len(leaves))])
-
             
-            self.hpm.hpm_data['editing_sites_by_types'].update({name:pd.Series(data=(syn_n,specie_specific_syn_n,res_n,specie_specific_res_n,div_n,specie_specific_div_n),
-                                                                       index=('synonymous','synonymous_specie_specific','restorative','restorative_specie_specific','diversifying','diversifying_specie_specific'), name=name)})
-                
-        
-        
         
         def determine_ancestral_state(self, row, ancestors, leaf, leaf_original_nucl='A', leaf_target_nucl='G', exclude_ancestry=['N0']):
 
@@ -806,7 +767,6 @@ class Hypothesis:
                 self.hpm.collect_editing_sites(edited_leaves=[(leaves,)],non_edited_leaves=[],editing_level_method=editing_level_method)
                 mat=self.hpm.edited.copy()
                 mat[leaves+'_editing_type']=mat.apply(lambda row: self.determine_ancestral_state(row,ancestors,leaves,leaf_original_nucl=leaf_original_nucl,leaf_target_nucl=leaf_target_nucl),axis=1)
-                
                 self.hpm.hpm_data['editing_levels_distribution_by_ancestral_state'].update({name+'_syn_res':mat[np.logical_and(mat[leaves+'_editing_type']=='res',mat[leaves+'_'+leaf_original_nucl+leaf_target_nucl+'_recoding']==0)][leaves+'_editing_level']})
                 self.hpm.hpm_data['editing_levels_distribution_by_ancestral_state'].update({name+'_syn_div':mat[np.logical_and(mat[leaves+'_editing_type']=='div',mat[leaves+'_'+leaf_original_nucl+leaf_target_nucl+'_recoding']==0)][leaves+'_editing_level']})
                 self.hpm.hpm_data['editing_levels_distribution_by_ancestral_state'].update({name+'_nonsyn_res':mat[np.logical_and(mat[leaves+'_editing_type']=='res',mat[leaves+'_'+leaf_original_nucl+leaf_target_nucl+'_recoding']==1)][leaves+'_editing_level']})
@@ -822,9 +782,7 @@ class Hypothesis:
                 self.hpm.collect_editing_sites(edited_leaves=[leaves],non_edited_leaves=[],editing_level_method=editing_level_method)
                 mat=self.hpm.edited.copy()
                 mat['editing_type'] = mat.apply(lambda row: self.determine_ancestral_state_for_multiple_leaves(row,leaves,leaf_original_nucl=leaf_original_nucl,leaf_target_nucl=leaf_target_nucl), axis=1)
-                
                 common_ancestor = self.hpm.tree.common_ancestor(leaves).name
-            
                 self.hpm.hpm_data['editing_levels_distribution_by_ancestral_state'].update({name+'_syn_res':mat[np.logical_and(mat['editing_type']=='res',mat[common_ancestor+'_'+leaf_original_nucl+leaf_target_nucl+'_recoding']==0)]['combined_editing_level']})
                 self.hpm.hpm_data['editing_levels_distribution_by_ancestral_state'].update({name+'_syn_div':mat[np.logical_and(mat['editing_type']=='div',mat[common_ancestor+'_'+leaf_original_nucl+leaf_target_nucl+'_recoding']==0)]['combined_editing_level']})
                 self.hpm.hpm_data['editing_levels_distribution_by_ancestral_state'].update({name+'_nonsyn_res':mat[np.logical_and(mat['editing_type']=='res',mat[common_ancestor+'_'+leaf_original_nucl+leaf_target_nucl+'_recoding']==1)]['combined_editing_level']})
@@ -913,8 +871,6 @@ class Hypothesis:
             unedited_n = len(unedited)
             unedited_mutations_n = len(unedited_mutations)
             mismatch=intermediate_nucl+leaf_nucl
-            
-            
             
             self.adaptive_model.adaptive_model_data['mutations_count'].update({name:pd.Series(data = [ancestor,intermediate,leaf,mismatch,recoding,editing_level_method,levels[0],levels[1],self.adaptive_model.edited_leaves,self.adaptive_model.non_edited_leaves,edited_n,edited_mutations_n,unedited_n,unedited_mutations_n],
                                                                       index = ['ancestor','intermediate','leaf','mismatch','type','editing_level_method','editing_level_lower_bound','editing_level_upper_bound','edited_leaves','unedited_leaves','edited','edited_mutations','unedited','unedited_mutations'], name=leaf)})
@@ -1088,7 +1044,6 @@ class Hypothesis:
             std =np.std(expected_non_syn_eg_mut_dist)
             p = float(sum([1 for j in expected_non_syn_eg_mut_dist if j<observed_strong_nonsyn_eg_mutations]))/float(n_random)
             
-            
             analysis_name = ancestor+'_to_'+intermediate+'_to_'+leaf+'_'+editing_level_method+'_'+str(weak_levels[1])+'_'+str(strong_levels[0])+'adaptive_rate'+str(opt_adaptive_rate)
             self.adaptive_model.adaptive_model_data['adaptive'].update({analysis_name:pd.Series(data = [ancestor,intermediate,leaf,optimize_adaptive_rate,percentile if optimize_adaptive_rate else None,
                                                                                                        editing_level_method,strong_levels[0],strong_levels[1],weak_levels[0],weak_levels[1],
@@ -1175,8 +1130,7 @@ if __name__=='__main__':
 #     nucl_mat=pd.read_csv(nucl_mat_file,sep='\t',error_bad_lines=False, index_col=False, dtype='unicode')
 #     nucl_mat=nucl_mat.apply(pd.to_numeric, errors='ignore')
 #     print(str(len(nucl_mat)) + ' rows in nucl matrix')
-#     
-#     
+#       
 #     animals=['oct','bim','sep','squ','bob','lin']
 #     columns=['anmimal','syn_sites','syn_a','nonsyn_sites','nonsyn_a']
 #     data=[]
@@ -1186,9 +1140,7 @@ if __name__=='__main__':
 #         syn_sites = lecl_mat[np.logical_and(nucl_mat[a+'_nuc']=="A",nucl_mat[a+'_AG_recoding']==0)])
 #         nonsyn_sites = len(nucl_mat[np.logical_and(nucl_mat[a+'_edited']==1,nucl_mat[a+'_AG_recoding']==1)])
 #         nonsyn_a = len(nucl_mat[np.logical_and(nucl_mat[a+'_nuc']=="A",nucl_mat[a+'_AG_recoding']==1)])
-#     
 #         data.append((a,syn_sites,syn_a,nonsyn_sites,nonsyn_a))
-#     
 #     df = pd.DataFrame(data=data,columns=columns)
 #     df.to_csv(outpath+'syn_non_syn_incedence',sep='\t',index=False)
 # =============================================================================
@@ -1204,70 +1156,38 @@ if __name__=='__main__':
 #     hyp=Hypothesis(nucl_mat.copy(),tree_str=newick_tree_str)
 #     hpm=Hypothesis.HPM(hyp)
 # 
-#     # hpm.calc_editing_types_rates('sep')
-#     # hpm.calc_editing_types_rates('squ')
-#     # hpm.calc_editing_types_rates('oct')
-#     # hpm.calc_editing_types_rates('bim')
-#     # hpm.calc_editing_types_rates('bob')
-#     # hpm.calc_editing_types_rates('lin')
-#     # hpm.calc_editing_types_rates(['bim','oct'])
-#     # hpm.calc_editing_types_rates(['squ','lin'])
-#     # hpm.calc_editing_types_rates(['squ','lin','bob'])
-#     # hpm.calc_editing_types_rates(['sep','squ','bob','lin'])
-#     # hpm.calc_editing_types_rates(['sep','squ','bob','lin','oct','bim'])
-#     # hpm.hpm.write_data(outpath,file_name='editing_types_rates_all',data_to_write=['editing_types_rates'],file_type='csv',sub_name='')
-# 
-#     # del(hyp)
-#     # del(hpm)
-#     # hyp=Hypothesis(nucl_mat.copy(),tree_str=newick_tree_str)
-#     # hpm=Hypothesis.HPM(hyp)
-#     # hpm.calc_editing_types_rates('sep',editing_levels=[0.1,1])
-#     # hpm.calc_editing_types_rates('squ',editing_levels=[0.1,1])
-#     # hpm.calc_editing_types_rates('oct',editing_levels=[0.1,1])
-#     # hpm.calc_editing_types_rates('bim',editing_levels=[0.1,1])
-#     # hpm.calc_editing_types_rates('bob',editing_levels=[0.1,1])
-#     # hpm.calc_editing_types_rates('lin',editing_levels=[0.1,1])
-#     # hpm.calc_editing_types_rates(['bim','oct'],editing_levels=[0.1,1])
-#     # hpm.calc_editing_types_rates(['squ','lin'],editing_levels=[0.1,1])
-#     # hpm.calc_editing_types_rates(['squ','lin','bob'],editing_levels=[0.1,1])
-#     # hpm.calc_editing_types_rates(['sep','squ','bob','lin'],editing_levels=[0.1,1])
-#     # hpm.calc_editing_types_rates(['sep','squ','bob','lin','oct','bim'],editing_levels=[0.1,1])
-#     # hpm.hpm.write_data(outpath,file_name='editing_types_rates_strong',data_to_write=['editing_types_rates'],file_type='csv',sub_name='')
+#     hpm.calc_editing_types_rates('sep',editing_levels=[0.1,1])
+#     hpm.calc_editing_types_rates('squ',editing_levels=[0.1,1])
+#     hpm.calc_editing_types_rates('oct',editing_levels=[0.1,1])
+#     hpm.calc_editing_types_rates('bim',editing_levels=[0.1,1])
+#     hpm.calc_editing_types_rates('bob',editing_levels=[0.1,1])
+#     hpm.calc_editing_types_rates('lin',editing_levels=[0.1,1])
+#     hpm.hpm.write_data(outpath,file_name='editing_types_rates_strong',data_to_write=['editing_types_rates'],file_type='csv',sub_name='')
 #     
-#     # del(hyp)
-#     # del(hpm)
-#     # hyp=Hypothesis(nucl_mat.copy(),tree_str=newick_tree_str)
-#     # hpm=Hypothesis.HPM(hyp)
-#     # hpm.calc_editing_types_rates('sep',editing_levels=[0,0.1])
-#     # hpm.calc_editing_types_rates('squ',editing_levels=[0,0.1])
-#     # hpm.calc_editing_types_rates('oct',editing_levels=[0,0.1])
-#     # hpm.calc_editing_types_rates('bim',editing_levels=[0,0.1])
-#     # hpm.calc_editing_types_rates('bob',editing_levels=[0,0.1])
-#     # hpm.calc_editing_types_rates('lin',editing_levels=[0,0.1])
-#     # hpm.calc_editing_types_rates(['bim','oct'],editing_levels=[0,0.1])
-#     # hpm.calc_editing_types_rates(['squ','lin'],editing_levels=[0,0.1])
-#     # hpm.calc_editing_types_rates(['squ','lin','bob'],editing_levels=[0,0.1])
-#     # hpm.calc_editing_types_rates(['sep','squ','bob','lin'],editing_levels=[0,0.1])
-#     # hpm.calc_editing_types_rates(['sep','squ','bob','lin','oct','bim'],editing_levels=[0,0.1])
-#     # hpm.hpm.write_data(outpath,file_name='editing_types_rates_weak',data_to_write=['editing_types_rates'],file_type='csv',sub_name='')
+#     del(hyp)
+#     del(hpm)
+#     hyp=Hypothesis(nucl_mat.copy(),tree_str=newick_tree_str)
+#     hpm=Hypothesis.HPM(hyp)
+#     hpm.calc_editing_types_rates('sep',editing_levels=[0,0.1])
+#     hpm.calc_editing_types_rates('squ',editing_levels=[0,0.1])
+#     hpm.calc_editing_types_rates('oct',editing_levels=[0,0.1])
+#     hpm.calc_editing_types_rates('bim',editing_levels=[0,0.1])
+#     hpm.calc_editing_types_rates('bob',editing_levels=[0,0.1])
+#     hpm.calc_editing_types_rates('lin',editing_levels=[0,0.1])
+#     hpm.hpm.write_data(outpath,file_name='editing_types_rates_weak',data_to_write=['editing_types_rates'],file_type='csv',sub_name='')
 # 
 # 
-#     # del(hyp)
-#     # del(hpm)
-#     # hyp=Hypothesis(nucl_mat.copy(),tree_str=newick_tree_str)
-#     # hpm=Hypothesis.HPM(hyp) 
-#     # hpm.collect_editing_levels_distributions_by_types('sep')
-#     # hpm.collect_editing_levels_distributions_by_types('squ')
-#     # hpm.collect_editing_levels_distributions_by_types('oct')
-#     # hpm.collect_editing_levels_distributions_by_types('bim')
-#     # hpm.collect_editing_levels_distributions_by_types('bob')
-#     # hpm.collect_editing_levels_distributions_by_types('lin')
-#     # hpm.collect_editing_levels_distributions_by_types(['bim','oct'])
-#     # hpm.collect_editing_levels_distributions_by_types(['squ','lin'])
-#     # hpm.collect_editing_levels_distributions_by_types(['squ','lin','bob'])
-#     # hpm.collect_editing_levels_distributions_by_types(['sep','squ','bob','lin'])
-#     # hpm.collect_editing_levels_distributions_by_types(['sep','squ','bob','lin','oct','bim'])
-#     # hpm.hpm.write_data(outpath,file_name='editing_levels_distribution_by_type',data_to_write=['editing_levels_distribution_by_type'],file_type='csv',sub_name='')
+#     del(hyp)
+#     del(hpm)
+#     hyp=Hypothesis(nucl_mat.copy(),tree_str=newick_tree_str)
+#     hpm=Hypothesis.HPM(hyp) 
+#     hpm.collect_editing_levels_distributions_by_types('sep')
+#     hpm.collect_editing_levels_distributions_by_types('squ')
+#     hpm.collect_editing_levels_distributions_by_types('oct')
+#     hpm.collect_editing_levels_distributions_by_types('bim')
+#     hpm.collect_editing_levels_distributions_by_types('bob')
+#     hpm.collect_editing_levels_distributions_by_types('lin')
+#     hpm.hpm.write_data(outpath,file_name='editing_levels_distribution_by_type',data_to_write=['editing_levels_distribution_by_type'],file_type='csv',sub_name='')
 # =============================================================================
     
     

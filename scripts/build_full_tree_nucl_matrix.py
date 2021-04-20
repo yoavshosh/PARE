@@ -20,7 +20,6 @@ import subprocess
 import time
 from Bio import SeqIO, AlignIO
 from Bio.Seq import Seq
-from Bio.Alphabet import generic_dna 
 import argparse
 import warnings
 
@@ -73,7 +72,7 @@ def retrive_native_coding_sequence_in_orfs(trinity_row, editing_sites_tbl):
         sequence = sequence[:es_row['location']-1] + native_nuc_in_seq + sequence[es_row['location']:]
         
     if trinity_row['strand'] == '-':
-        coding_sequence = str(Seq(sequence[trinity_row['orfs_start']-1:trinity_row['orfs_end']], generic_dna).reverse_complement())
+        coding_sequence = str(Seq(sequence[trinity_row['orfs_start']-1:trinity_row['orfs_end']]).reverse_complement())
     elif trinity_row['strand'] == '+':
         coding_sequence = sequence[trinity_row['orfs_start']-1:trinity_row['orfs_end']]
 
@@ -264,7 +263,7 @@ def parse_msa_results(msa_num, alignment, ancestoral_nucl_prob_table, relevant_e
                         if str(aa_col[j].seq)=='---':
                             compare_list.append('-')
                         else:
-                            compare_list.append(str(Seq(str(aa_col[j].seq),generic_dna).translate()))
+                            compare_list.append(str(Seq(str(aa_col[j].seq)).translate()))
             if len(set(compare_list))==1 and '-' not in compare_list:
                 consensus_msa_aa+=1
             else:
@@ -292,7 +291,7 @@ def parse_msa_results(msa_num, alignment, ancestoral_nucl_prob_table, relevant_e
         elif loc_inside_codon == 2:
             mut_codon = codon[:2]+mut_nuc
 
-        aa_after = str(Seq(mut_codon, generic_dna).translate())
+        aa_after = str(Seq(mut_codon).translate())
         if aa_before==aa_after:
             recoding=0
         else:
@@ -502,7 +501,7 @@ def parse_msa_results(msa_num, alignment, ancestoral_nucl_prob_table, relevant_e
                         if codon == 'gap':
                             aa_before = '-'
                         else:
-                            aa_before = str(Seq(codon, generic_dna).translate())
+                            aa_before = str(Seq(codon).translate())
                             
                         #calculating target aa wrt to all possible mutations
                         location_data+=(aa_before,)
@@ -616,11 +615,11 @@ if __name__ == '__main__':
     run_parser.add_argument('-animals', dest='animals', action='store', nargs = '+', default = ['oct','bim','squ','sep','bob','lin','nau','apl'], help='subset of animals in MSA')
     run_parser.add_argument('-ancestors', dest='ancestors', action='store', nargs = '+', default = [], help='subset of ancestors in tree that are contained in the MSA file')
     run_parser.add_argument('-clust_range', dest='cluster_range', action='store', default = '100', help='editing sites clustering range - all sites in cluster have a neighbor in the cluster not further than cluster_range')
-    run_parser.add_argument('-n_workers', dest='n_workers', action='store', default = '50', help='number of chiled processes for msa results analysis')
+    run_parser.add_argument('-threads', dest='n_workers', action='store', default = '10', help='number of chiled processes for msa results analysis')
     run_parser.add_argument('-proteins_msa', dest='proteins_msa', action='store', default = 'False', help='read and parse muscle msa for proteins sequences')
     run_parser.add_argument('-only_edited_position', dest='only_edited_position', action='store', default = 'False', help='create table containing only msa columns (as rows) for which at least one animal is edited')
     run_parser.add_argument('-animals_order', dest='animals_order', action='store', nargs = '+', default = ['oct','bim','sep','squ','lin','bob','nau','apl'], help='animals in order for ordering columns after run')
-    run_parser.add_argument('-ancestors_order', dest='ancestors_order', action='store', nargs = '+', default = ['O','S1','S0','D','C','N1','N0'], help='animals in order for ordering columns after run')
+    run_parser.add_argument('-ancestors_order', dest='ancestors_order', action='store', nargs = '+', default = ['O','S1','S0','D','C','N1','N0'], help='ancestors in order for ordering columns after run')
     run_parser.add_argument('-super_orthologs_by_name', dest='super_orthologs_by_name', action='store', default = 'False', help='collect super orthologs by protein name')
     
     arguments = parser.parse_args()

@@ -13,6 +13,7 @@ import pandas as pd
 import numpy as np
 import itertools as it
 import statsmodels.stats as smstats
+import glob
 from scipy import stats
 from statsmodels.stats.multitest import fdrcorrection
 
@@ -23,12 +24,120 @@ try:
 except ImportError:
     from io import StringIO ## for Python 3
     
-from plots_for_hypotheses_test_results import *
+    
+try:
+    import matplotlib.pyplot as plt
+except ImportError:
+    print('Could not Import data-viz libraries')
+    
+# from plots_for_hypotheses_test_results import pval_str, animals_names_dict
+from build_full_tree_nucl_matrix import create_super_orthologs_df_by_orthomcl_hits, natural_sort
+
+
+def trinity_comps_stops(trinity_file):
+    """
+    read relevat information from transcriptome file
+    """
+    def stop_codon(row):
+        if row['strand']=="+":
+            if len(row['sequence'])-3<row['end']:
+                stop = '---'
+            else:
+                stop = str(row['sequence'][row['end']:row['end']+3])
+        elif row['strand']=="-":
+            if row['start']<=3:
+                stop = '---'
+            else:
+                stop = str(row['sequence'][row['start']-4:row['start']-1].reverse_complement())
+        else:
+            stop = "unknown_strand"
+    
+        if stop not in ["---","TAG","TGA","TAA"]:
+            print(row["id"]+': unrecognized stop')
+        
+        return stop
+    
+    data = []
+    col_names = ['id','start','end','strand','sequence']
+    for record in SeqIO.parse(open(trinity_file, "r"), "fasta"):
+        rec_data = record.description.split('\t')
+        rec_data[0] = rec_data[0].rstrip()  #some fastafiles have spaces after each id, so fixing it here.
+        strand = rec_data[6]
+        start = int(rec_data[2])
+        end = int(rec_data[4])
+        sequence = record.seq        
+        data.append((record.id,start,end,strand,sequence))
+    df = pd.DataFrame(data = data, columns = col_names)
+    df['stop']=df.apply(lambda row: stop_codon(row), axis=1)
+    return df
 
 
 
+def count_stops_for_super_orthologs(super_orthologs, trinity_stops_dfs_dict, animals):
+    
+    stops_dict = {}
+    for a in animals:
+        stops_dict.update({a:{'TAA':0,'TAG':0,'TGA':0}})
+    
+    for i, row in super_orthologs.iterrows():
+        temp_stops_dict_per_row={}
+        count_codons=True
+        for a in animals:
+            stop = trinity_stops_dfs_dict[a].loc[row[a],"stop"]
+            if stop=="---":
+                count_codons=False
+                break
+            else:
+                temp_stops_dict_per_row.update({a:stop})
+        if count_codons:
+            for a in animals:
+                stops_dict[a][temp_stops_dict_per_row[a]]+=1
 
-def count_codons_in_fasta(file, remove_gaped_columns=True,use_alignment_obj=True):
+    return stops_dict
+     
+
+def create_concatenated_msa_with_stops(msas_path,trinity_stops_dfs_dict,outdir,animals):
+
+    def add_stop_to_align_object(file,trinity_stops_dfs_dict,outpath):
+        
+        out_file_name = file.split('/')[-1].split('_')[-1]
+        with open(file,"r") as f: data = f.read()      
+        alignment=AlignIO.read(StringIO(data), 'fasta')
+        
+        with open(outpath+out_file_name,"w") as fout:
+            for row in alignment:
+                stop = trinity_stops_dfs_dict[row.id.split('|')[0]].loc[row.id,'stop']    
+                seq = str(row.seq)
+                last_ungapped_col = max([str(seq).rindex(n) for n in ['A','T','G','C']])
+                new_seq = seq[:last_ungapped_col+1]+stop+seq[last_ungapped_col+1:]
+                fout.write(">"+row.id+'\n')
+                fout.write(new_seq+'\n')
+        fout.close()
+        
+    def concatMSAfiles(animals,msas_path,files_prefix=''):
+        joined_msas_dict={}
+        for a in animals:
+            joined_msas_dict.update({a:''})
+        for f in glob.glob(os.path.join(msas_path,files_prefix+'*.fasta')):
+            alignment = AlignIO.read(open(f), "fasta")
+            for i in range(len(animals)):
+                current_id = alignment[i].id
+                current_animal = current_id.split('|')[0]
+                current_seq = str(alignment[i].seq)
+                joined_msas_dict[current_animal]+=current_seq 
+        
+        with open(msas_path+'concatinated_msas.fasta',"w") as handle:
+            for k,v in joined_msas_dict.items():
+                handle.write('>'+k+'\n')
+                handle.write(v+'\n')
+
+    
+    for f in natural_sort(glob.glob(os.path.join(msas_path,'*/codons_msa_for_super_orthologs_*.fasta'))):        
+        add_stop_to_align_object(f,trinity_stops_dfs_dict,outdir)    
+    concatMSAfiles(animals,outdir)
+
+
+def count_codons_in_alignment(align, remove_gaped_columns=True):
     """
     Codons distribution in MSA
     Accept
@@ -45,59 +154,45 @@ def count_codons_in_fasta(file, remove_gaped_columns=True,use_alignment_obj=True
     codons_dict=dict.fromkeys(codons,0)
     results = []
     
-    if use_alignment_obj:    
-        with open(file,"r") as f: data = f.read()
+    #read alignment if align is alignment file path
+    if type(align) is str:
+        with open(align,"r") as f: data = f.read()
         alignment=AlignIO.read(StringIO(data), 'fasta')
-        length = alignment.get_alignment_length()
-        if length%3:
-            warnings.warn('Alignment length is not a multiple of 3 !!!') 
-        
-        # initialize dict for alignment ids with initialized codons count dicts as values  
-        alignment_animals=[alignment[i].id for i in range(len(alignment))]
-        all_animals_codons_dicts={}
-        for a in alignment_animals:
-            all_animals_codons_dicts.update({a:copy.deepcopy(codons_dict)})            
-        
-        for i in np.arange(0,length,3):
-            tmp_dict = {}
-            codon_align=alignment[:,i:i+3]
-            count_column=True
-            for j in range(len(alignment_animals)):
-                codon_id= codon_align[j].id
-                codon_seq=str(codon_align[j].seq)
-                if remove_gaped_columns:
-                    if '-' in codon_seq:
-                        count_column=False
-                        break
-                tmp_dict.update({codon_id:codon_seq})
-            
-            if count_column:
-                for k,v in tmp_dict.items():
-                    all_animals_codons_dicts[k][v]+=1   
-        
-        for a, codons_cnt_dict in all_animals_codons_dicts.items():
-            results.append(pd.Series(codons_cnt_dict, name=a))
-        
-        
-    else: #just use SeqIO to read and iterate fasta sequences.
-        if remove_gaped_columns:
-            warnings.warn('setting remove_gaped_columns to False. call with use_alignment_obj=True instead')
-        
-        for record in SeqIO.parse(open(file, "r"), "fasta"):
-            codons_dict_per_animal = dict.fromkeys(codons,0)
-            rest_downstream = str(record.seq)
-            length=int(len(rest_downstream))
-            if len(rest_downstream)%3:
-                warnings.warn(record.id + ' sequence is not a multiple of 3 !!!')
-            for i in range(int(length/3)):
-                codon, rest_downstream = rest_downstream[:3],rest_downstream[3:]
-                codons_dict_per_animal[codon]+=1
-                
-            results.append(pd.Series(codons_dict_per_animal, name=record.id) )
+    else: #else, continue with alignment object
+        alignment=align
     
+    length = alignment.get_alignment_length()
+    if length%3:
+        warnings.warn('Alignment length is not a multiple of 3 !!!') 
+    
+    # initialize dict for alignment ids with initialized codons count dicts as values  
+    alignment_animals=[alignment[i].id for i in range(len(alignment))]
+    all_animals_codons_dicts={}
+    for a in alignment_animals:
+        all_animals_codons_dicts.update({a:copy.deepcopy(codons_dict)})            
+    
+    for i in np.arange(0,length,3):
+        tmp_dict = {}
+        codon_align=alignment[:,i:i+3]
+        count_column=True
+        for j in range(len(alignment_animals)):
+            codon_id= codon_align[j].id
+            codon_seq=str(codon_align[j].seq)
+            if remove_gaped_columns:
+                if '-' in codon_seq:
+                    count_column=False
+                    break
+            tmp_dict.update({codon_id:codon_seq})
+        
+        if count_column:
+            for k,v in tmp_dict.items():
+                all_animals_codons_dicts[k][v]+=1   
+    
+    for a, codons_cnt_dict in all_animals_codons_dicts.items():
+        results.append(pd.Series(codons_cnt_dict, name=a))
+            
     return pd.concat(results,axis=1)
     
-
 
 def calc_t_for_codons_rates(row,animals,controls,df):
         
@@ -303,17 +398,66 @@ def plot_codons_dist_for_multiple_animals_horizontal(df,animals,outpath,title):
 
 if __name__=='__main__':
     
+    count_stops = True
     count_codons=False
-    calc_results=True
+    calc_results=False
+    
+    if count_stops:
+        
+        # all_best_hits_file=sys.argv[1]
+        # trinity_path=sys.argv[2]
+        # msas_path=sys.argv[3]
+        # out_dir = sys.argv[4]
+        all_best_hits_file = "C:/Users/shosh/Google_Drive/adaptive recoding in cephalopods/new_native_transcriptomes/all_best_hits.txt"
+        trinity_path = "C:/Users/shosh/Google_Drive/adaptive recoding in cephalopods/new_native_transcriptomes/"
+        msas_path = "D:/RNA_Editing_large_files_Backup_20201205/test/"
+        out_dir = 'count_codons'
+        animals = ['apl','nau','oct','bim','sep','squ','bob','lin']
+        
+        
+        out_dir = '/'+'/'.join(all_best_hits_file.split('/')[:-1])+'/'+out_dir+'/'
+        if not os.path.exists(out_dir):
+            os.makedirs(out_dir)
+        
+        all_best_hits = pd.read_csv(all_best_hits_file, sep = '\t', names = ['seq1','seq2','score']) 
+        all_best_hits['animal_1'] = all_best_hits.apply(lambda row: row['seq1'][:3], axis=1)
+        all_best_hits['animal_2'] = all_best_hits.apply(lambda row: row['seq2'][:3], axis=1)
+        super_orthologs = create_super_orthologs_df_by_orthomcl_hits(all_best_hits,animals)
+        
+        trinity_stops_dfs_dict = {}
+        for a in animals:
+            print("Reading stops for "+a)
+            trinity_file = trinity_path + "orfs_"+a+".fa"
+            trinity_df = trinity_comps_stops(trinity_file)
+            trinity_df["id"]= trinity_df.apply(lambda row: a+"|"+row["id"], axis=1)
+            trinity_df.set_index("id",inplace=True)
+            trinity_stops_dfs_dict.update({a:trinity_df})
+
+
+        stops_dict = count_stops_for_super_orthologs(super_orthologs, trinity_stops_dfs_dict, animals)                
+        data_dict = {k:(v['TAA'],v['TAG'],v['TGA']) for k,v in stops_dict.items()}
+        data_dict.update({'codon':('TAA','TAG','TGA')})
+        stops_cnt_df = pd.DataFrame.from_dict(data_dict,orient='columns')
+        stops_cnt_df.set_index('codon',inplace=True)
+        stops_cnt_df.to_excel(out_dir+'stops_cnt_per_orthologs.xlsx')
+    
+        create_concatenated_msa_with_stops(msas_path,trinity_stops_dfs_dict,out_dir,animals)
+        remove_gaps = True
+        concat_msa_file = out_dir+'concatinated_msas.fasta'
+        codons_df = count_codons_in_alignment(concat_msa_file,remove_gaped_columns=remove_gaps)
+        codons_df.to_csv(out_dir+'/'+"all_codons_cnt_from_msa.txt",sep='\t',index=True)
+    
     
     if count_codons:
         file = sys.argv[1]
         remove_gaps = sys.argv[2]
         out_file = sys.argv[3]
+        
         # file = 'D:/RNA_Editing_large_files_Backup_20201205/codons_msa_for_super_orthologs_2613.fasta'
         # remove_gaps=True
         # out_file='codons_no_gaps_test'
-        codons_df = count_codons_in_fasta(file,remove_gaped_columns=remove_gaps)
+        concat_msa_file = msas_path
+        codons_df = count_codons_in_alignment(file,remove_gaped_columns=remove_gaps)
         codons_df.to_csv(os.getcwd()+'/'+out_file,sep='\t',index=True)
 
     if calc_results:
