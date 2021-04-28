@@ -940,7 +940,7 @@ class Hypothesis:
        
         
 
-        def expected_mutations_distribution(self, ancestor, intermediate, leaf, leaf_nucl, 
+        def expected_mutations_distribution(self, ancestor, intermediate, leaf, intermediate_nucl='A', leaf_nucl='G',
                                             edited_leaves=None, non_edited_leaves=None, editing_level_method='average',
                                             weak_levels=[0,0.02], strong_levels=[0.1,1], confidence_level=1, n_random=1000000,
                                             sites_recalculation=True,filter_internucl_for_edit_condition=True,only_recoded_genes=False,distance_from_recoding=None,fix_depletion=None,
@@ -1238,14 +1238,14 @@ if __name__=='__main__':
             for weak_levels in weak_levels_list:
                 if strong_levels[0]>=weak_levels[1]:
                     print('Adaptive model - editing levels method: '+editing_level_method+' strong levels:'+str(strong_levels)+' weak_levels:'+str(weak_levels)+' adaptive_rate:'+str(0))
-                    model.expected_mutations_distribution(ancestor,intermediate,leaf,leaf_mutated_nucl,non_edited_leaves=[],
+                    model.expected_mutations_distribution(ancestor,intermediate,leaf,leaf_nucl=leaf_mutated_nucl,non_edited_leaves=[],
                                                           weak_levels=weak_levels,strong_levels=strong_levels,sites_recalculation=False,
                                                           filter_internucl_for_edit_condition=filter_adeno_w_edit_condition,only_recoded_genes=only_recoded_genes,
                                                           distance_from_recoding=distance_from_recoding,optimize_adaptive_rate=False,adaptive_rate=0.0)
                     for perc in percentiles_list:
                         print('Adaptive model - editing levels method: '+editing_level_method+' strong levels:'+str(strong_levels)+' weak_levels:'+str(weak_levels)+'. Optimized adaptive rate for percentile '+str(perc))
                         try:
-                            model.expected_mutations_distribution(ancestor,intermediate,leaf,leaf_mutated_nucl,non_edited_leaves=[],
+                            model.expected_mutations_distribution(ancestor,intermediate,leaf,leaf_nucl=leaf_mutated_nucl,non_edited_leaves=[],
                                                                   weak_levels=weak_levels,strong_levels=strong_levels,sites_recalculation=False,
                                                                   filter_internucl_for_edit_condition=filter_adeno_w_edit_condition,only_recoded_genes=only_recoded_genes,
                                                                   distance_from_recoding=distance_from_recoding,optimize_adaptive_rate=True,percentile=perc)
