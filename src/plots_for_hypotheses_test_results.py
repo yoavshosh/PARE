@@ -1426,25 +1426,73 @@ def mutations_rates_tests(path):
     df_all = pd.concat(dfs_list,sort=False)
     df_all['p_val'] = df_all.apply(lambda row: stats.fisher_exact([[row['edited'],row['edited_mutations']],[row['unedited'],row['unedited_mutations']]])[1],axis=1)
     df_all.to_excel(path+'mutations_tests_results.xlsx',index=False)
-   
+
 
 def rates_per_gene_analysis(path):
 
-    writer = pd.ExcelWriter('/'.join([path,'mutations_per_gene.xlsx']), engine='xlsxwriter')
+    def calcRates(row):
+        try:
+            row['syn_rate'] =float(row['leaf_syn_mut']) / row['intermediate_syn']
+        except ZeroDivisionError:
+            row['syn_rate'] = np.nan
 
+        try:
+            row['nonsyn_rate'] = float(row['leaf_non_syn_mut']) / row['intermediate_nonsyn']
+        except ZeroDivisionError:
+            row['nonsyn_rate'] = np.nan
+
+        return row
+
+    def plot_rates_dist(outpath,fig_name,vals,marked_rate,minimal_bin=0.0,maximal_bin=1):
+
+        bins = np.arange(minimal_bin, maximal_bin,0.005)
+        fig, ax = plt.subplots(figsize=(10, 10))
+        sns.distplot(vals, kde=False, norm_hist=False, bins=bins, color='red')
+        plt.axvline(x=marked_rate, color='black', linestyle='--')
+        plt.xlim(0.0,0.3)
+        plt.tick_params(axis='both', which='major', labelsize=25)
+        plt.gca().spines['top'].set_visible(False)
+        plt.gca().spines['right'].set_visible(False)
+        plt.savefig(outpath + fig_name + '.jpg')
+        plt.close()
+
+
+    columns = ('path','general_syn','general_nonsyn','edited_syn','edited_nonsyn',)
+    for n in [10, 50, 100, 150, 200]:
+        columns+=('edited_syn_distance'+str(n),'edited_nonsyn_distance'+str(n),)
+
+    data = []
+    writer = pd.ExcelWriter('/'.join([path,'mutations_per_gene.xlsx']), engine='xlsxwriter')
     for f in glob.glob(path+'rates_per_gene_iden0.3_in_range10_*'):
         f = f.replace('\\','/')
         df = pd.read_csv(f,sep='\t',index_col=0)
         name = '_'.join(f.split('/')[-1].split('_')[6:9])
-        syn_rate = sum(df['leaf_syn_mut'])/float(sum(df['intermediate_syn']))
-        nonsyn_rate = sum(df['leaf_non_syn_mut']) / float(sum(df['intermediate_nonsyn']))
-        print(name+': syn='+str(syn_rate)+' ; nonsyn='+str(nonsyn_rate))
-
         df.to_excel(writer, sheet_name=name,index=False,)
 
+        general_syn_rate = sum(df['leaf_syn_mut']) / float(sum(df['intermediate_syn']))
+        general_nonsyn_rate = sum(df['leaf_nonsyn_mut']) / float(sum(df['intermediate_nonsyn']))
+        # df = df.apply(lambda row: calcRates(row), axis=1)
+        # plot_rates_dist(path, name + '_synR', df[~df['syn_rate'].isnull()]['syn_rate'].values, general_syn_rate)
+        # plot_subs_ratesates_dist(path, name + '_nonsynR', df[~df['nonsyn_rate'].isnull()]['nonsyn_rate'].values, general_nonsyn_rate)
+
+        nonsyn_edited_df = df[df['intermediate_nonsyn_editing_sites']>0]
+        edited_syn_rate = sum(nonsyn_edited_df['leaf_syn_mut']) / float(sum(nonsyn_edited_df['intermediate_syn']))
+        edited_nonsyn_rate = sum(nonsyn_edited_df['leaf_nonsyn_mut']) / float(sum(nonsyn_edited_df['intermediate_nonsyn']))
+        # plot_rates_dist(path, name + '_nonsyn_editing_synR', nonsyn_edited_df[~nonsyn_edited_df['syn_rate'].isnull()]['syn_rate'].values, general_syn_rate)
+        # plot_rates_dist(path, name + '_nonsyn_editing_nonsynR', nonsyn_edited_df[~nonsyn_edited_df['nonsyn_rate'].isnull()]['nonsyn_rate'].values,general_nonsyn_rate)
+
+        path_data = (name,general_syn_rate,general_nonsyn_rate,edited_syn_rate,edited_nonsyn_rate)
+
+        for n in [10,50,100,150,200]:
+            distant_nucl_edited_syn_rate = sum(nonsyn_edited_df['leaf_'+str(n)+'_distant_syn_mut']) / float(sum(nonsyn_edited_df['intermediate_'+str(n)+'_distant_syn']))
+            distant_nucl_edited_nonsyn_rate = sum(nonsyn_edited_df['leaf_'+str(n)+'_distant_nonsyn_mut']) / float(sum(nonsyn_edited_df['intermediate_'+str(n)+'_distant_nonsyn']))
+            path_data+=(distant_nucl_edited_syn_rate,distant_nucl_edited_nonsyn_rate,)
+
+        data.append(path_data)
+
     writer.save()
-
-
+    rates_comparison = pd.DataFrame(data=data, columns=columns)
+    rates_comparison.to_excel(path+'rates_comparison.xlsx',index=False)
 
 
 
@@ -1471,7 +1519,7 @@ if __name__=='__main__':
         conserved_groups=None
         path = 'D:/RNA_Editing_large_files_Backup_20201205/Phylogeny/Results_fixed/raxml_tree/all8/hpm/'
         rates_df, el_df = collect_results_for_hpm_and_plot_probs(path,animals,conserved_groups)
-    
+
     if general_model_results:
         path = 'D:/RNA_Editing_large_files_Backup_20201205/Phylogeny/Results_fixed/oleg_tree/coleoids/adaptive/'
         results_dfs_dict = collect_results_for_general_model_and_plot_probs(path, recalc=True)
@@ -1493,13 +1541,13 @@ if __name__=='__main__':
         plot_adaptive_rates_with_con_interval(path, labels, adap_rates, yerrs)
 
     if calc_substitutions_form_ancestor:
-        params_groups = [
-                         ('C',([0,0.1],[0.1,1],[0,1]),[('sep','oct'),('sep','bim'),('squ','oct'),('squ','bim'),('bob','oct'),('bob','bim'),('lin','oct'),('lin','bim')],['sep','squ','bob','lin','oct','bim'],'all8_rooted',
-                         'C:/Users/shosh/OneDrive/Desktop/RNA_Editing_large_files_Backup_20200906/Phylogeny/results/Sanchez/non_neural/4fold/edited_rows_from_4fold_non_neural_subset','non_neural'),
-                         ('C',([0,0.1],[0.1,1],[0,1]),[('sep','oct'),('sep','bim'),('squ','oct'),('squ','bim'),('bob','oct'),('bob','bim'),('lin','oct'),('lin','bim')],['sep','squ','bob','lin','oct','bim'],'all8_rooted',
-                         'C:/Users/shosh/OneDrive/Desktop/RNA_Editing_large_files_Backup_20200906/Phylogeny/results/Sanchez/neural/4fold/edited_rows_from_4fold_neural_subset','neural')
-
-                         ]
+        # params_groups = [
+        #                  ('C',([0,0.1],[0.1,1],[0,1]),[('sep','oct'),('sep','bim'),('squ','oct'),('squ','bim'),('bob','oct'),('bob','bim'),('lin','oct'),('lin','bim')],['sep','squ','bob','lin','oct','bim'],'all8_rooted',
+        #                  'C:/Users/shosh/OneDrive/Desktop/RNA_Editing_large_files_Backup_20200906/Phylogeny/results/Sanchez/non_neural/4fold/edited_rows_from_4fold_non_neural_subset','non_neural'),
+        #                  ('C',([0,0.1],[0.1,1],[0,1]),[('sep','oct'),('sep','bim'),('squ','oct'),('squ','bim'),('bob','oct'),('bob','bim'),('lin','oct'),('lin','bim')],['sep','squ','bob','lin','oct','bim'],'all8_rooted',
+        #                  'C:/Users/shosh/OneDrive/Desktop/RNA_Editing_large_files_Backup_20200906/Phylogeny/results/Sanchez/neural/4fold/edited_rows_from_4fold_neural_subset','neural')
+        #
+        #                  ]
 
         params_groups = [
                          ('C',([0,0.1],[0.1,1],[0,1]),[('sep','oct'),('sep','bim'),('squ','oct'),('squ','bim'),('bob','oct'),('bob','bim'),('lin','oct'),('lin','bim')],['sep','squ','bob','lin','oct','bim'],'all8_rooted_ncbi',

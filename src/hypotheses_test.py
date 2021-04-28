@@ -59,9 +59,9 @@ class Hypothesis:
         self.ancestors_to_leaves_dict = {}
         self.ancestors_to_downstream_ancestors_dict = {}
         self.ancestors_to_upstream_ancestors_dict = {}
-        self.filters_dict=filters_dict
+        self.filters_dict = filters_dict
         self.original_filters_dict = filters_dict
-        self.nucl_mat=nucl_mat
+        self.nucl_mat = nucl_mat
         self.original_full_matrix=nucl_mat
         self.edited = None
         self.mutated_editing_sites = None
@@ -77,7 +77,7 @@ class Hypothesis:
         self.sites_in_intermediate_nodes={}
         self.adaptive_model_data = {'adaptive':{},
                                     'mutations_count':{}}
-        
+
         self.hpm_data = {'editing_levels_histogram':{},
                          'mutated_sites_editing_levels_histogram':{},
                          'editing_sites_by_types':{},
@@ -87,24 +87,24 @@ class Hypothesis:
                          'editing_rates_by_ancestral_state':{},
                          'editing_levels_distribution_by_ancestral_state':{},
                          'dnds_dict':{}}
-    
+
         self.editing_level_method = None
         self.adaptive_model = self.create_adaptive_model()
         self.HPM = self.create_Harm_permitting_model()
-        
+
         if tree_str is not None:
             self.create_tree_relations_dicts()
-        
+
         if filter_now:
             self.filter_nucl_matrix()
-            
+
     def create_tree_relations_dicts(self):
-    
+
         handle = StringIO(self.tree_str)
         tree = Phylo.read(handle, "newick")
         self.tree = tree
         root_name=tree.root.name
-        
+
         self.leaves_to_ancestors_dict.clear()
         leaves=tree.get_terminals()
         for l in leaves:
@@ -113,17 +113,17 @@ class Hypothesis:
                 if n.name != l.name:
                     ancestors+=(n.name,)
             self.leaves_to_ancestors_dict.update({l.name:ancestors})
-        
+
         self.ancestors_to_leaves_dict.clear()
         ancestors = tree.get_nonterminals()
         for a in ancestors:
             self.ancestors_to_leaves_dict.update({a.name:[l.name for l in a.get_terminals()]})
-            
+
         self.ancestors_to_downstream_ancestors_dict.clear()
         ancestors = tree.get_nonterminals()
         for a in ancestors:
             self.ancestors_to_downstream_ancestors_dict.update({a.name:[i.name for i in a.get_nonterminals() if i.name!=a.name]})
-        
+
         self.ancestors_to_upstream_ancestors_dict.clear()
         ancestors = tree.get_nonterminals()
         for a in ancestors:
@@ -135,7 +135,7 @@ class Hypothesis:
                     if n.name!=a.name:
                         upstream_ancestors+=(n.name,)
                 self.ancestors_to_upstream_ancestors_dict.update({a.name:upstream_ancestors})
-                
+
     def find_recent_common_ancestor(self, leavs):
         assert (self.tree is not None), "phylogenetic tree is not defined"
         return self.tree.common_ancestor(leavs)
@@ -159,23 +159,23 @@ class Hypothesis:
             pass
         else:
             self.filters_dict = filters_dict
-            
+
         self.remove_filters()
         filtered_nucl_mat = self.nucl_mat
         for k,v in self.filters_dict.items():
-            
+
             key_suffix = ''
             for d in self.filter_types_for_suffix_dict.keys():
                 if k.endswith(d):
                     key_suffix=d
                     break
             assert (key_suffix!=''), "key suffix was not found in filter_types_for_suffix_dict"
-            
+
             if type(self.filter_types_for_suffix_dict[key_suffix])!=type:
                 assert (type(v) in self.filter_types_for_suffix_dict[key_suffix]),"Ilegal filter type for "+k+" got "+type(v).__name__+", expects "+str(self.filter_types_for_suffix_dict[key_suffix])
             else:
                 assert (type(v)==self.filter_types_for_suffix_dict[key_suffix]),"Ilegal filter type for "+k+" got "+type(v).__name__+", expects "+self.filter_types_for_suffix_dict[key_suffix].__name__
-            
+
             if type(v)==str or type(v)==int:
                 filtered_nucl_mat = filtered_nucl_mat[filtered_nucl_mat[k]==v]
             elif type(v)==tuple:
@@ -183,7 +183,7 @@ class Hypothesis:
             elif type(v)==list:
                 filtered_nucl_mat = filtered_nucl_mat[filtered_nucl_mat[k]>v[0]]
                 filtered_nucl_mat = filtered_nucl_mat[filtered_nucl_mat[k]<=v[-1]]
-        
+
         self.nucl_mat=filtered_nucl_mat
         #filteting editeding sites
         if self.edited is not None and self.edited_leaves is not None:
@@ -191,7 +191,7 @@ class Hypothesis:
         #filtering mutated editing sites
         if self.mutated_editing_sites is not None:
             self.collect_mutated_editing_sites(self.leaf,self.leaf_nucl)
-            
+
         #recalculating mutation rates
         for k in self.rates.keys():
             internal_nod=k.split('_')[0]
@@ -216,36 +216,44 @@ class Hypothesis:
         if branch in self.rates.keys():
             if mm in self.rates[branch].keys():
                 exist=True
-                
+
         if not exist:
             mat = self.nucl_mat
             mat = mat[mat[ancestral_nod+'_nuc']==ancestral_nod_nucl]
-            total_syn = mat[mat[ancestral_nod+'_'+ancestral_nod_nucl+mutated_end_nod_nucl+'_recoding']==0]          
+            total_syn = mat[mat[ancestral_nod+'_'+ancestral_nod_nucl+mutated_end_nod_nucl+'_recoding']==0]
             total_nonsyn = mat[mat[ancestral_nod+'_'+ancestral_nod_nucl+mutated_end_nod_nucl+'_recoding']==1]
             mutated_syn = total_syn[total_syn[end_nod+'_nuc']==mutated_end_nod_nucl]
-            mutated_non_syn = total_nonsyn[total_nonsyn[end_nod+'_nuc']==mutated_end_nod_nucl]         
+            mutated_non_syn = total_nonsyn[total_nonsyn[end_nod+'_nuc']==mutated_end_nod_nucl]
             if branch in self.rates:
                 self.rates[branch].update({mm:(('syn', float(len(mutated_syn)), float(len(mutated_syn))/float(len(total_syn)), float(len(total_syn))), ('nonsyn', float(len(mutated_non_syn)), float(len(mutated_non_syn))/float(len(total_nonsyn)), float(len(total_nonsyn))))})
             else:
                 self.rates.update({branch:{mm:(('syn', float(len(mutated_syn)), float(len(mutated_syn))/float(len(total_syn)), float(len(total_syn))), ('nonsyn', float(len(mutated_non_syn)), float(len(mutated_non_syn))/float(len(total_nonsyn)), float(len(total_nonsyn))))}})
 
     def collect_mutations_per_gene(self, ancestor, intermediate, intermediate_nucl, leaf, leaf_nucl, edited_leaves = None, non_edited_leaves=None,
-                                   editing_level_method='average', filter_internucl_for_edit_condition=True):
+                                   editing_level_method='average', filter_internucl_for_edit_condition=True, distance_from_recoding=None):
         """
         Creates a dictionary of data frames of mutation along a certain path for ecah gene in the teminal node
         """
         data = []
         columns = ('super_orthologs_id', 'leaf_id', 'intermediate_syn', 'intermediate_nonsyn',
-                   'leaf_syn_mut','leaf_non_syn_mut','intermediate_syn_editing_sites','intermediate_nonsyn_editing_sites')
+                   'leaf_syn_mut','leaf_nonsyn_mut','intermediate_syn_editing_sites','intermediate_nonsyn_editing_sites',)
 
         self.define_nodes(ancestor, intermediate, leaf, intermediate_nucl=intermediate_nucl,leaf_nucl=leaf_nucl)
         if filter_internucl_for_edit_condition:
             self.filter_matrix_with_intermediate_editing_condition(edited_leaves=edited_leaves,nucl=intermediate_nucl)
         self.collect_editing_sites(edited_leaves=edited_leaves, non_edited_leaves=non_edited_leaves,editing_level_method=editing_level_method)
 
-        mat = self.nucl_mat
+        if distance_from_recoding is not None:
+            self.calc_distance_from_editing_in_ancestral_sites(intermediate)
+            if type(distance_from_recoding)==int:
+                distance_from_recoding = [distance_from_recoding]
+
+            for n in distance_from_recoding:
+                columns += ('intermediate_'+str(n)+'_distant_syn', 'intermediate_'+str(n)+'_distant_nonsyn',
+                            'leaf_'+str(n)+'_distant_syn_mut', 'leaf_'+str(n)+'_distant_nonsyn_mut')
+
         for i in set(list(self.nucl_mat['super_orthologs_id'].values)):
-            orthologs_mat = mat[mat['super_orthologs_id']==i]
+            orthologs_mat = self.nucl_mat[self.nucl_mat['super_orthologs_id']==i]
             orthologs_mat = orthologs_mat[orthologs_mat[intermediate+'_nuc']==intermediate_nucl]
             leaf_id = list(orthologs_mat[leaf+'_id'].values)[0]
             editing_sites_mat = self.edited[self.edited['super_orthologs_id']==i]
@@ -255,7 +263,17 @@ class Hypothesis:
             nonsyn_editing_sites = editing_sites_mat[editing_sites_mat[intermediate+'_'+intermediate_nucl+leaf_nucl+'_recoding']==1]
             syn_mutations = syn_mat[syn_mat[leaf+'_nuc']==leaf_nucl]
             nonsyn_mutations = nonsyn_mat[nonsyn_mat[leaf+'_nuc']==leaf_nucl]
-            data.append((i,leaf_id,len(syn_mat),len(nonsyn_mat),len(syn_mutations),len(nonsyn_mutations),len(syn_editing_sites),len(nonsyn_editing_sites)))
+            gene_data = (i, leaf_id, len(syn_mat), len(nonsyn_mat), len(syn_mutations), len(nonsyn_mutations),len(syn_editing_sites), len(nonsyn_editing_sites),)
+
+            for n in distance_from_recoding:
+                distant_nucl_orthologs_mat = orthologs_mat[orthologs_mat[intermediate+'_distance_to_nearest_recoding_site'] >= n]
+                distant_nucl_syn_mat = distant_nucl_orthologs_mat[distant_nucl_orthologs_mat[intermediate + '_' + intermediate_nucl + leaf_nucl + '_recoding'] == 0]
+                distant_nucl_nonsyn_mat = distant_nucl_orthologs_mat[distant_nucl_orthologs_mat[intermediate + '_' + intermediate_nucl + leaf_nucl + '_recoding'] == 1]
+                distant_syn_mutations = distant_nucl_syn_mat[distant_nucl_syn_mat[leaf + '_nuc'] == leaf_nucl]
+                distant_nonsyn_mutations = distant_nucl_nonsyn_mat[distant_nucl_nonsyn_mat[leaf + '_nuc'] == leaf_nucl]
+                gene_data+=(len(distant_nucl_syn_mat),len(distant_nucl_nonsyn_mat),len(distant_syn_mutations),len(distant_nonsyn_mutations),)
+
+            data.append(gene_data)
 
         branch = intermediate+'_to_'+leaf
         mm = intermediate_nucl+leaf_nucl
@@ -288,7 +306,7 @@ class Hypothesis:
                     edited_leaves.append(tuple(sorted([l,m])))
         edited_leaves = list(set(edited_leaves))
         self.edited_leaves = [x for x in edited_leaves if x]
-        
+
         non_edited_leaves = []
         all_ancestors_leaves=self.ancestors_to_leaves_dict[self.ancestor]
         all_root_leaves=self.ancestors_to_leaves_dict[self.tree.root.name]
@@ -309,16 +327,16 @@ class Hypothesis:
                 if len(group)==sum([1 for a in group if row[a+'_nuc']==nucl]):
                     in_unified_intersections=1
             return in_unified_intersections
-        
+
         if edited_leaves is None:
             self.get_groups_of_edited_and_unedited_sites()
             edited_leaves=self.edited_leaves
         else:
             self.edited_leaves = edited_leaves
-        
+
         mat = self.nucl_mat.copy()
         mat['in_unified_intersections'] = mat.apply(lambda row: in_unification_of_intersections(row, edited_leaves, nucl=nucl), axis=1)
-        mat = mat[mat['in_unified_intersections']==1]  
+        mat = mat[mat['in_unified_intersections']==1]
         self.nucl_mat=mat.copy()
 
     def collect_editing_sites(self, edited_leaves = None, non_edited_leaves=None, editing_level_method='average', bin_size=0.05):
@@ -337,7 +355,7 @@ class Hypothesis:
                     in_unified_intersections=0
                     break
             return in_unified_intersections
-        
+
         if edited_leaves is None:
             self.get_groups_of_edited_and_unedited_sites()
             edited_leaves=self.edited_leaves
@@ -352,15 +370,15 @@ class Hypothesis:
         else:
             self.edited_leaves = edited_leaves
             self.non_edited_leaves = non_edited_leaves
-        
+
         mat = self.nucl_mat.copy()
         mat['in_unified_intersections'] = mat.apply(lambda row: in_unification_of_intersections(row, edited_leaves, non_edited_leaves), axis=1)
-        mat = mat[mat['in_unified_intersections']==1]  
+        mat = mat[mat['in_unified_intersections']==1]
         self.editing_level_method=editing_level_method
         self.edited = mat.drop(labels='in_unified_intersections',axis=1)
         self.editing_level_method = editing_level_method
         self.calc_combined_editing_levels(editing_level_method=editing_level_method)
-                
+
     def collect_mutated_editing_sites(self, leaf, leaf_nucl, bin_size=0.05):
         """
         collect editing sites from self.edited for which given leaf was mutated to leaf_nucl
@@ -398,9 +416,9 @@ class Hypothesis:
             self.mutated_editing_sites=mat.copy()
 
     def write_data(self, path, file_name='hypotheses_analysis', data_to_write = ['strict','liberal','no_depletion'], file_type='xlsx', sub_name='sheet1'):
-        
+
         def write(file_type, data_frame, path, file_name, name_sufix=None):
-            
+
             if file_type=='xlsx':
                 if os.path.isfile(path+file_name):
                     from openpyxl import load_workbook
@@ -410,7 +428,7 @@ class Hypothesis:
                 else:
                     writer = pd.ExcelWriter(path+file_name+'.xlsx', engine='xlsxwriter')
                 if name_sufix is None:
-                    name_sufix='sheet1' 
+                    name_sufix='sheet1'
                 data_frame.to_excel(writer, sheet_name = name_sufix)
                 writer.save()
                 writer.close()
@@ -420,17 +438,17 @@ class Hypothesis:
                 else:
                     name=file_name+'_'+name_sufix
                 data_frame.to_csv(path+name, sep='\t')
-                
-             
+
+
         for data in data_to_write:
             if data=='adaptive':
-                data_frame=pd.concat([s for s in self.adaptive_model_data[data].values()], axis=1, sort=False)    
+                data_frame=pd.concat([s for s in self.adaptive_model_data[data].values()], axis=1, sort=False)
                 write(file_type, data_frame, path, file_name, name_sufix=data)
             elif data in ['mutations_count','editing_types_count','editing_types_rates','editing_ancestral_rates','dnds','sites_substitutions',]:
                 if data=='mutations_count':
                     data_frame=pd.concat([s for s in self.adaptive_model_data[data].values()], axis=1, sort=False).transpose()
                     write(file_type, data_frame, path, file_name)
-                else:  
+                else:
                     data_frame=pd.concat([s for s in self.hpm_data[data].values()], axis=1, sort=False).transpose()
                     write(file_type, data_frame, path, file_name)
             elif data in ['editing_levels_distribution_by_type','editing_levels_distribution_by_ancestral_state']:
@@ -466,6 +484,24 @@ class Hypothesis:
         syn_s=len(edited[edited[intermediate+'_'+original_nucl+target_nucl+'_recoding']==0])
         non_syn_s=len(edited[edited[intermediate+'_'+original_nucl+target_nucl+'_recoding']==1])
         self.sites_in_intermediate_nodes.update({intermediate,(float(syn_s)/syn_a,float(non_syn_s)/non_syn_a)})
+
+    def calc_distance_from_editing_in_ancestral_sites(self, node):
+        """
+        Filter the nucl DB to position distanced from recoding site at least <distance> positions
+        """
+        def calculate_distances(row, node, editing_sites):
+            nuc_coding_location = row[node+'_coding_location']
+            sites_in_gene = editing_sites[editing_sites['super_orthologs_id']==row['super_orthologs_id']]
+            if len(sites_in_gene):
+                sites_coding_locations = sites_in_gene[node+'_coding_location']
+                return nuc_coding_location - sites_coding_locations[np.abs(sites_coding_locations - nuc_coding_location).idxmin()]
+            else:
+                return np.inf
+
+        assert(node in [a.name for a in self.tree.get_nonterminals()]), "passed node is terminal, use pre-calculated field"
+        assert(self.edited is not None), "must collect editing sites first"
+        recoding_sites = self.edited[self.edited[node+'_AG_recoding']==1].copy()
+        self.nucl_mat[node+'_distance_to_nearest_recoding_site'] = self.nucl_mat.apply(lambda row: calculate_distances(row, node, recoding_sites), axis=1)
 
     def create_Harm_permitting_model(self):
         return Hypothesis.HPM(self)
@@ -525,13 +561,11 @@ class Hypothesis:
                     return stats.fisher_exact([[hits,pop],[control_hits,control_pop]])[1]
                 else:
                     return '-'
-                
-            
+
             assert(type(leaves_groups)==list or type(leaves_groups)==tuple), "leaves_groups must be a nested list"
             assert(write_source_table and path is not None), "must provide a valid path if write_source_table=True"
             
             mat=self.hpm.nucl_mat
-
             if examined_animals is None:
                 examined_animals = list(set([a for group in leaves_groups for a in group]))
             mat['editing_type'] = mat.apply(lambda row: self.determine_editing_type_for_multiple_leaves(row,examined_animals,ancestor_for_type=ancestor_for_type,leaf_original_nucl=leaf_original_nucl,leaf_target_nucl=leaf_target_nucl), axis=1)
@@ -580,8 +614,7 @@ class Hypothesis:
             self.hpm.hpm_data['sites_substitutions'].update({name:pd.Series(data=(ancestor_for_type,leaves_groups,non_edited_leaves,examined_animals,editing_level_lower_bound,editing_level_upper_bound,count_multiple_subs_per_sites,syn_subs,syn,res_subs,res,res_p,div_subs,div,div_p,nonsyn_unknown_type_subs,nonsyn_unknown_type,nonsyn_unknown_type_p,tot_nonsyn_subs,tot_nonsyn,tot_nonsyn_p),
                                                                 index=('common_ancestor_for_sites_type','edited_groups','non_edited_leaves','subs_in_any_of','editing_level_lower_bound','editing_level_upper_bound','multiple_subs_per_sites','syn_subs','syn','res_subs','res','res_p','div_subs','div','div_p','nonsyn_unknown_type_subs','nonsyn_unknown_type','nonsyn_unknown_type_p','total_nonsyn_subs','total_nonsyn','tot_nonsyn_p'), name=name)})
             
-            
-            
+
         def collect_editing_levels_distributions_by_types(self, leaves, leaf_original_nucl='A', leaf_target_nucl='G', ancestors=None, editing_level_method='average',exclude_ancestry=['N0']):
             
             if ancestors is None:
@@ -667,8 +700,7 @@ class Hypothesis:
                 
             self.hpm.hpm_data['editing_types_rates'].update({name:pd.Series(data=(syn_edited,specie_specific_syn_edited,syn,res_edited,specie_specific_res_edited,res,div_edited,specie_specific_div_edited,div),
                                                                       index=('syn_edited','specie_specific_syn_edited','syn','res_edited','specie_specific_res_edited','res','div_edited','specie_specific_div_edited','div'), name=name)})
-            
-            
+
         
         def determine_ancestral_state(self, row, ancestors, leaf, leaf_original_nucl='A', leaf_target_nucl='G', exclude_ancestry=['N0']):
 
@@ -678,6 +710,7 @@ class Hypothesis:
             else:
                 return 'div'
             
+
         def determine_ancestral_state_for_multiple_leaves(self, row, leaves, leaf_original_nucl='A', leaf_target_nucl='G', exclude_ancestry=['N0'], ancestor_for_type=None):
             """
             For sites shared by multiple leaves, 
@@ -864,7 +897,9 @@ class Hypothesis:
             self.adaptive_model = hypothoesis
               
         
-        def compare_edited_and_unedited_substitution(self, ancestor, intermediate, leaf, intermediate_nucl='A', leaf_nucl='G', syn=True, edited_leaves=None, non_edited_leaves=[],  levels=[0.1,1], editing_level_method='average', sites_recalculation=True, filter_internucl_for_edit_condition=True):
+        def compare_edited_and_unedited_substitution(self, ancestor, intermediate, leaf, intermediate_nucl='A', leaf_nucl='G',
+                                                     syn=True, edited_leaves=None, non_edited_leaves=[],  levels=[0.1,1], editing_level_method='average',
+                                                     sites_recalculation=True, filter_internucl_for_edit_condition=True):
                             
             self.adaptive_model.define_nodes(ancestor,intermediate,leaf,intermediate_nucl=intermediate_nucl,leaf_nucl=leaf_nucl)
             if filter_internucl_for_edit_condition:
@@ -906,16 +941,16 @@ class Hypothesis:
         
 
         def expected_mutations_distribution(self, ancestor, intermediate, leaf, leaf_nucl, 
-                                                 edited_leaves=None, non_edited_leaves=None, editing_level_method='average', 
-                                                 weak_levels=[0,0.02], strong_levels=[0.1,1], confidence_level=1, n_random=1000000, 
-                                                 sites_recalculation=True,filter_internucl_for_edit_condition=True,fix_depletion=None,
-                                                 calc_expected_hp_sites_mutations=True,calc_adaptive_sites_mutations=False,adaptive_rate=0.0,optimize_adaptive_rate=False,percentile=50):
+                                            edited_leaves=None, non_edited_leaves=None, editing_level_method='average',
+                                            weak_levels=[0,0.02], strong_levels=[0.1,1], confidence_level=1, n_random=1000000,
+                                            sites_recalculation=True,filter_internucl_for_edit_condition=True,only_recoded_genes=False,distance_from_recoding=None,fix_depletion=None,
+                                            calc_expected_hp_sites_mutations=True,calc_adaptive_sites_mutations=False,adaptive_rate=0.0,optimize_adaptive_rate=False,percentile=50):
 
             
             def observed_and_expected_mut_pdiff(adaptive_rate,expected_mut,excess_mut,adaptive_mut,
-                                               observed_mut,percentile,syn_a,non_syn_a,syn_ag_mut,non_syn_ag_mut,
-                                               weak_syn_sites,weak_non_syn_sites,strong_syn_sites,strong_nonsyn_sites,
-                                               confidence_level,n,fix_depletion,calc_expected_hp_sites_mutations,calc_adaptive_sites_mutations):
+                                                observed_mut,percentile,syn_a,non_syn_a,syn_ag_mut,non_syn_ag_mut,
+                                                weak_syn_sites,weak_non_syn_sites,strong_syn_sites,strong_nonsyn_sites,
+                                                confidence_level,n,fix_depletion,calc_expected_hp_sites_mutations,calc_adaptive_sites_mutations):
                 
                 del(expected_mut[:])
                 del(excess_mut[:])
@@ -997,21 +1032,31 @@ class Hypothesis:
                     excess_mut.append(expected_eg_mut_from_excess_rand)
                     adaptive_mut.append(expected_eg_mut_from_adaptive_rand)
 
-                
-            assert 0.0<=adaptive_rate<=1.0, "adaptive rate can not exceed [0,1]"
-            self.adaptive_model.define_nodes(ancestor,intermediate,leaf,intermediate_nucl=intermediate_nucl,leaf_nucl=leaf_nucl)
-            if filter_internucl_for_edit_condition:
-                self.adaptive_model.filter_matrix_with_intermediate_editing_condition(edited_leaves=edited_leaves,nucl=intermediate_nucl)
-            self.adaptive_model.calc_mutation_rate(intermediate,intermediate_nucl,leaf,leaf_nucl)
-            
+
+            assert 0.0 <= adaptive_rate <= 1.0, "adaptive rate can not exceed [0,1]"
+            self.adaptive_model.define_nodes(ancestor, intermediate, leaf, intermediate_nucl=intermediate_nucl,leaf_nucl=leaf_nucl)
+
+            # collecting editing sites matrix at intermediate node and mutated editing sites
             if sites_recalculation or (self.adaptive_model.edited is None or self.adaptive_model.mutated_editing_sites is None):
                 self.adaptive_model.collect_editing_sites(edited_leaves=edited_leaves,non_edited_leaves=non_edited_leaves,editing_level_method=editing_level_method)
                 self.adaptive_model.collect_mutated_editing_sites(leaf, leaf_nucl)
-                        
-            intermediate_nucl_mat = self.adaptive_model.nucl_mat[self.adaptive_model.nucl_mat[intermediate+'_nuc']==intermediate_nucl]
-            edited_mat = self.adaptive_model.edited[self.adaptive_model.edited[intermediate+'_nuc']==intermediate_nucl]
-            mutations_mat = self.adaptive_model.mutated_editing_sites[self.adaptive_model.mutated_editing_sites[intermediate+'_nuc']==intermediate_nucl]
-            
+            edited_mat = self.adaptive_model.edited[self.adaptive_model.edited[intermediate + '_nuc'] == intermediate_nucl]
+            mutations_mat = self.adaptive_model.mutated_editing_sites[self.adaptive_model.mutated_editing_sites[intermediate + '_nuc'] == intermediate_nucl]
+
+            # different filter for the general nucl matrix
+            self.adaptive_model.nucl_mat = self.adaptive_model.nucl_mat[self.adaptive_model.nucl_mat[intermediate + '_nuc'] == intermediate_nucl]
+            if only_recoded_genes:
+                recoded_set = set(list(self.adaptive_model.adaptive['super_orthologs_id'].values))
+                self.adaptive_model.nucl_mat = self.adaptive_model.nucl_mat[self.adaptive_model.nucl_mat['super_orthologs_id'].isin(recoded_set)]
+            if distance_from_recoding is not None:
+                self.adaptive_model.calc_distance_from_editing_in_ancestral_sites(intermediate)
+                self.adaptive_model.nucl_mat[self.adaptive_model.nucl_mat[intermediate+'_distance_to_nearest_recoding_site']>=distance_from_recoding]
+            if filter_internucl_for_edit_condition:
+                self.adaptive_model.filter_matrix_with_intermediate_editing_condition(edited_leaves=edited_leaves,nucl=intermediate_nucl)
+
+            self.adaptive_model.calc_mutation_rate(intermediate,intermediate_nucl,leaf,leaf_nucl)
+
+            intermediate_nucl_mat = self.adaptive_model.nucl_mat
             syn_a = len(intermediate_nucl_mat[intermediate_nucl_mat[intermediate+'_'+intermediate_nucl+leaf_nucl+'_recoding']==0])
             non_syn_a = len(intermediate_nucl_mat[intermediate_nucl_mat[intermediate+'_'+intermediate_nucl+leaf_nucl+'_recoding']==1])
             syn_ag_mut = int(self.adaptive_model.rates[intermediate+'_to_'+leaf][intermediate_nucl+leaf_nucl][0][1])
@@ -1024,8 +1069,7 @@ class Hypothesis:
             observed_strong_syn_eg_mutations=len(mutations_mat[np.logical_and(mutations_mat[intermediate+'_'+intermediate_nucl+leaf_nucl+'_recoding']==0,np.logical_and(mutations_mat['combined_editing_level']>strong_levels[0], mutations_mat['combined_editing_level']<=strong_levels[1]))])
             strong_nonsyn_eg_mutations_rate = float(observed_strong_nonsyn_eg_mutations)/float(strong_nonsyn_sites)
             strong_syn_eg_mutations_rate = float(observed_strong_syn_eg_mutations)/float(strong_syn_sites)
-                
-            
+
             syn_sites_creation_rate = float(strong_syn_sites)/float(syn_a)
             non_syn_over_syn_a = float(non_syn_a)/float(syn_a)
             non_syn_over_syn_weak_sites = float(weak_nonsyn_sites)/float(weak_syn_sites)
@@ -1044,7 +1088,6 @@ class Hypothesis:
                                    weak_syn_sites,weak_nonsyn_sites,strong_syn_sites,
                                    strong_nonsyn_sites,confidence_level,n_random,fix_depletion,
                                    calc_expected_hp_sites_mutations,calc_adaptive_sites_mutations)
-                
                 opt_adaptive_rate=optimize.bisect(observed_and_expected_mut_pdiff,0,1,args=additional_args)
                 opt_adaptive_sites = float(strong_nonsyn_sites)*opt_adaptive_rate
                 strong_hp_nonsyn_sites = strong_nonsyn_sites-opt_adaptive_sites
@@ -1157,7 +1200,7 @@ if __name__=='__main__':
             else:
                 nucl_mat = nucl_mat[np.logical_or(nucl_mat['N1_nuc']==ancestor_nucl,nucl_mat['N0_nuc']==ancestor_nucl)].copy()
 
-    if True:
+    if False:
         print('Calculating mutation rates per gene ')
         iden_filter_cols = [col for col in nucl_mat.columns if ('aa_range' in col and leaf not in col and all([a in col for a in animals if a!=leaf ]))]
         iden = 0.3
@@ -1167,11 +1210,11 @@ if __name__=='__main__':
         filtered_nucl_mat = nucl_mat[nucl_mat[filter_col]>=iden]
         hyp=Hypothesis(filtered_nucl_mat.copy(),tree_str=newick_tree_str)
         model = Hypothesis.Adaptive_model(hyp)
-        file_name='rates_per_gene_'+'_iden'+str(iden)+'_in_range'+str(r)
-        hyp.collect_mutations_per_gene(ancestor,intermediate,'A',leaf,leaf_mutated_nucl,edited_leaves=None,non_edited_leaves=[])
+        file_name='rates_per_gene_iden'+str(iden)+'_in_range'+str(r)
+        hyp.collect_mutations_per_gene(ancestor,intermediate,'A',leaf,leaf_mutated_nucl,edited_leaves=None,non_edited_leaves=[],distance_from_recoding=[10,50,100,150,200])
         hyp.write_data(outpath,file_name=file_name,file_type='csv',data_to_write = ['mutations_per_gene'])
 
-    if False:
+    if True:
         print('Creating  models from '+ancestor)
         iden_filter_cols = [col for col in nucl_mat.columns if ('aa_range' in col and leaf not in col and all([a in col for a in animals if a!=leaf ]))]
         iden = 0.3
@@ -1188,19 +1231,27 @@ if __name__=='__main__':
         strong_levels_list = [[0.1,1]]
         weak_levels_list = [[0,0.05]]
         percentiles_list = [2.5,50,97.5]
+        only_recoded_genes = True
+        distance_from_recoding = 200
 
         for strong_levels in strong_levels_list:
             for weak_levels in weak_levels_list:
                 if strong_levels[0]>=weak_levels[1]:
                     print('Adaptive model - editing levels method: '+editing_level_method+' strong levels:'+str(strong_levels)+' weak_levels:'+str(weak_levels)+' adaptive_rate:'+str(0))
-                    model.expected_mutations_distribution(ancestor,intermediate,leaf,leaf_mutated_nucl,non_edited_leaves=[],weak_levels=weak_levels,strong_levels=strong_levels,sites_recalculation=False,filter_internucl_for_edit_condition=filter_adeno_w_edit_condition,optimize_adaptive_rate=False,adaptive_rate=0.0)
+                    model.expected_mutations_distribution(ancestor,intermediate,leaf,leaf_mutated_nucl,non_edited_leaves=[],
+                                                          weak_levels=weak_levels,strong_levels=strong_levels,sites_recalculation=False,
+                                                          filter_internucl_for_edit_condition=filter_adeno_w_edit_condition,only_recoded_genes=only_recoded_genes,
+                                                          distance_from_recoding=distance_from_recoding,optimize_adaptive_rate=False,adaptive_rate=0.0)
                     for perc in percentiles_list:
                         print('Adaptive model - editing levels method: '+editing_level_method+' strong levels:'+str(strong_levels)+' weak_levels:'+str(weak_levels)+'. Optimized adaptive rate for percentile '+str(perc))
                         try:
-                            model.expected_mutations_distribution(ancestor,intermediate,leaf,leaf_mutated_nucl,non_edited_leaves=[],weak_levels=weak_levels,strong_levels=strong_levels,sites_recalculation=False,filter_internucl_for_edit_condition=filter_adeno_w_edit_condition,optimize_adaptive_rate=True,percentile=perc)
-                            model.adaptive_model.write_data(outpath,file_name=file_name,file_type='csv',data_to_write = ['adaptive'])
+                            model.expected_mutations_distribution(ancestor,intermediate,leaf,leaf_mutated_nucl,non_edited_leaves=[],
+                                                                  weak_levels=weak_levels,strong_levels=strong_levels,sites_recalculation=False,
+                                                                  filter_internucl_for_edit_condition=filter_adeno_w_edit_condition,only_recoded_genes=only_recoded_genes,
+                                                                  distance_from_recoding=distance_from_recoding,optimize_adaptive_rate=True,percentile=perc)
                         except ValueError as e:
                             print('Error while running adaptive model with optimizing adaptive rate mode:\n'+str(e))
+                        model.adaptive_model.write_data(outpath, file_name=file_name, file_type='csv',data_to_write=['adaptive'])
 
 # =============================================================================
 #     outpath = '/'.join(nucl_mat_file.split('/')[0:-1])+'/'
