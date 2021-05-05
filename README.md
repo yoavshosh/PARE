@@ -82,3 +82,21 @@ You can have your evolutionary tree topology in a newick format (see exmp_files)
 If you need to infer the topology yourself| you can use [RAxML-NG](https://github.com/amkozlov/raxml-ng) or other software preferred by you.
 see tree.txt in exmp_files for an example
 
+You should prepare your project directory in a similar manner to the exmp_files directory before executing the pipeline, including the sub-directories and file names
+note that some of the files names contain the species name - the substring of the species name is of course changeable and should match your species name
+
+### The pipeline
+
+##### Multiple MSA procedures of the gifferent orthologous groups. 
+You could consider a proteins based MSA as usually, in coding sequences, the protein structure is expected to be conserved along the phylogeny
+
+example command:
+'python run_msa_for_super_orthologs.py -parent_dir <project_directory> -o <output_dir_name> -animals <species_for_MSA> -program clu -msa_processes 30 -proteins_msa True'
+
+use 'run_msa_for_super_orthologs.py --help' for more parameteres options
+
+
+
+
+
+
