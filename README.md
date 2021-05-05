@@ -87,17 +87,20 @@ note that some of the files names contain the species name - the substring of th
 
 ### The pipeline
 
-##### Multiple MSA procedures of the gifferent orthologous groups. 
+##### Multiple MSA procedures of the different orthologous groups. 
 You could consider a proteins based MSA as usually, in coding sequences, the protein structure is expected to be conserved along the phylogeny
 
 example command:
-
 `python run_msa_for_super_orthologs.py -parent_dir <project_directory> -o <output_dir_name> -animals <species_for_MSA> -program clu -msa_processes 30 -proteins_msa True`
-
 
 use `run_msa_for_super_orthologs.py --help` for more parameteres options
 
+This command will first create `<output_dir_name>` in which it will stor fasta files contatining the different orthologous groups indicated from all_best_hits.txt.
+It will then invoke MSA processes (in this example - 30 in parallel) for each of the orthologous group and will stor the results in `<output_dir_name>/msa_results/`
 
+You can also use `run_msa_for_super_orthologs.py --help`
+
+You can also use `run_msa_for_super_orthologs_based_proteins_name.py` to group orthologous genes based on the protein name instead of inferring it from the all_best_hits.txt file
 
 
 
