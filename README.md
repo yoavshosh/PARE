@@ -68,10 +68,10 @@ see all_best_hits.txt file in the exmp_files folder
 An example of the othologous genes table (see also all_best_hits.txt in exmp_files):
 |species 1					 |species 2					 |score |
 |:--------------------------:|:-------------------------:|:----:|
-|"apl|comp100003_c0_seq1	"|"bim|comp128003_c0_seq1	"|1.03	|
-|"apl|comp1000174_c0_seq1	"|"bim|comp106298_c0_seq1	"|0.783	|
-|"apl|comp10001_c0_seq1		"|"bim|comp146229_c0_seq1	"|0.445	|
-|apl|comp100093_c0_seq1		"|"bim|comp214875_c0_seq1	"|0.68	|
+|apl<code>&#124;</code>comp100003_c0_seq1	|bim<code>&#124;</code>comp128003_c0_seq1	|1.03	|
+|apl<code>&#124;</code>comp1000174_c0_seq1	|bim<code>&#124;</code>comp106298_c0_seq1	|0.783	|
+|apl<code>&#124;</code>comp10001_c0_seq1		|bim<code>&#124;</code>comp146229_c0_seq1	|0.445	|
+|apl<code>&#124;</code>comp100093_c0_seq1		|bim<code>&#124;</code>comp214875_c0_seq1	|0.68	|
 
 The score of each paring here is not needed for the pipline. It is just the output of OrthoMCL used for generating the pairs.
 you can fill it with an arbitrary value if you dont have any score for you orthologs pairing 
