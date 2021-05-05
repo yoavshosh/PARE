@@ -91,9 +91,9 @@ note that some of the files names contain the species name - the substring of th
 You could consider a proteins based MSA as usually, in coding sequences, the protein structure is expected to be conserved along the phylogeny
 
 example command:
-'python run_msa_for_super_orthologs.py -parent_dir <project_directory> -o <output_dir_name> -animals <species_for_MSA> -program clu -msa_processes 30 -proteins_msa True'
+<code>python run_msa_for_super_orthologs.py -parent_dir <project_directory> -o <output_dir_name> -animals <species_for_MSA> -program clu -msa_processes 30 -proteins_msa True<\code>
 
-use 'run_msa_for_super_orthologs.py --help' for more parameteres options
+use <code>run_msa_for_super_orthologs.py --help<\code> for more parameteres options
 
 
 
