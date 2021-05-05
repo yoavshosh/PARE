@@ -230,7 +230,7 @@ class Hypothesis:
                 self.rates.update({branch:{mm:(('syn', float(len(mutated_syn)), float(len(mutated_syn))/float(len(total_syn)), float(len(total_syn))), ('nonsyn', float(len(mutated_non_syn)), float(len(mutated_non_syn))/float(len(total_nonsyn)), float(len(total_nonsyn))))}})
 
     def collect_mutations_per_gene(self, ancestor, intermediate, intermediate_nucl, leaf, leaf_nucl, edited_leaves = None, non_edited_leaves=None,
-                                   editing_level_method='average', filter_internucl_for_edit_condition=True, distance_from_recoding=None):
+                                   editing_level_method='average', only_recoded_genes=True, filter_internucl_for_edit_condition=True, distance_from_recoding=None):
         """
         Creates a dictionary of data frames of mutation along a certain path for ecah gene in the teminal node
         """
@@ -239,10 +239,13 @@ class Hypothesis:
                    'leaf_syn_mut','leaf_nonsyn_mut','intermediate_syn_editing_sites','intermediate_nonsyn_editing_sites',)
 
         self.define_nodes(ancestor, intermediate, leaf, intermediate_nucl=intermediate_nucl,leaf_nucl=leaf_nucl)
-        if filter_internucl_for_edit_condition:
-            self.filter_matrix_with_intermediate_editing_condition(edited_leaves=edited_leaves,nucl=intermediate_nucl)
         self.collect_editing_sites(edited_leaves=edited_leaves, non_edited_leaves=non_edited_leaves,editing_level_method=editing_level_method)
 
+        if filter_internucl_for_edit_condition:
+            self.filter_matrix_with_intermediate_editing_condition(edited_leaves=edited_leaves,nucl=intermediate_nucl)
+        if only_recoded_genes:
+            recoded_set = set(list(self.edited[self.edited[intermediate + '_' + intermediate_nucl + leaf_nucl + '_recoding'] == 1]['super_orthologs_id'].values))
+            self.nucl_mat = self.nucl_mat[self.nucl_mat['super_orthologs_id'].isin(recoded_set)]
         if distance_from_recoding is not None:
             self.calc_distance_from_editing_in_ancestral_sites(intermediate)
             if type(distance_from_recoding)==int:
@@ -266,7 +269,7 @@ class Hypothesis:
             gene_data = (i, leaf_id, len(syn_mat), len(nonsyn_mat), len(syn_mutations), len(nonsyn_mutations),len(syn_editing_sites), len(nonsyn_editing_sites),)
 
             for n in distance_from_recoding:
-                distant_nucl_orthologs_mat = orthologs_mat[orthologs_mat[intermediate+'_distance_to_nearest_recoding_site'] >= n]
+                distant_nucl_orthologs_mat = orthologs_mat[np.abs(orthologs_mat[intermediate+'_distance_to_nearest_recoding_site']) >= n]
                 distant_nucl_syn_mat = distant_nucl_orthologs_mat[distant_nucl_orthologs_mat[intermediate + '_' + intermediate_nucl + leaf_nucl + '_recoding'] == 0]
                 distant_nucl_nonsyn_mat = distant_nucl_orthologs_mat[distant_nucl_orthologs_mat[intermediate + '_' + intermediate_nucl + leaf_nucl + '_recoding'] == 1]
                 distant_syn_mutations = distant_nucl_syn_mat[distant_nucl_syn_mat[leaf + '_nuc'] == leaf_nucl]
@@ -1046,11 +1049,11 @@ class Hypothesis:
             # different filter for the general nucl matrix
             self.adaptive_model.nucl_mat = self.adaptive_model.nucl_mat[self.adaptive_model.nucl_mat[intermediate + '_nuc'] == intermediate_nucl]
             if only_recoded_genes:
-                recoded_set = set(list(self.adaptive_model.adaptive['super_orthologs_id'].values))
+                recoded_set = set(list(edited_mat[edited_mat[intermediate+'_'+intermediate_nucl+leaf_nucl+'_recoding']==1]['super_orthologs_id'].values))
                 self.adaptive_model.nucl_mat = self.adaptive_model.nucl_mat[self.adaptive_model.nucl_mat['super_orthologs_id'].isin(recoded_set)]
             if distance_from_recoding is not None:
                 self.adaptive_model.calc_distance_from_editing_in_ancestral_sites(intermediate)
-                self.adaptive_model.nucl_mat[self.adaptive_model.nucl_mat[intermediate+'_distance_to_nearest_recoding_site']>=distance_from_recoding]
+                self.adaptive_model.nucl_mat = self.adaptive_model.nucl_mat[np.abs(self.adaptive_model.nucl_mat[intermediate+'_distance_to_nearest_recoding_site'])>=distance_from_recoding]
             if filter_internucl_for_edit_condition:
                 self.adaptive_model.filter_matrix_with_intermediate_editing_condition(edited_leaves=edited_leaves,nucl=intermediate_nucl)
 
@@ -1139,7 +1142,6 @@ class Hypothesis:
 
 if __name__=='__main__':
 
-
     # parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter, description='Harm-permitting and Adaptive models - Hypotheses tests and results based on generated DB containing phylogeny MSA data and editing events')
     # run_parser = parser.add_argument_group('Run PAML4 for a list of super orthologs proteins msa given a single tree for all')
     # run_parser.add_argument('--db', dest='nucl_mat_file', action='store', required = True, help='Path to the MSA+RNA editing database create by build_full_tree_nucl_matrix module')
@@ -1211,7 +1213,7 @@ if __name__=='__main__':
         hyp=Hypothesis(filtered_nucl_mat.copy(),tree_str=newick_tree_str)
         model = Hypothesis.Adaptive_model(hyp)
         file_name='rates_per_gene_iden'+str(iden)+'_in_range'+str(r)
-        hyp.collect_mutations_per_gene(ancestor,intermediate,'A',leaf,leaf_mutated_nucl,edited_leaves=None,non_edited_leaves=[],distance_from_recoding=[10,50,100,150,200])
+        hyp.collect_mutations_per_gene(ancestor,intermediate,'A',leaf,leaf_mutated_nucl,edited_leaves=None,non_edited_leaves=[],distance_from_recoding=[0,10,50,100,150,200])
         hyp.write_data(outpath,file_name=file_name,file_type='csv',data_to_write = ['mutations_per_gene'])
 
     if True:
@@ -1232,7 +1234,7 @@ if __name__=='__main__':
         weak_levels_list = [[0,0.05]]
         percentiles_list = [2.5,50,97.5]
         only_recoded_genes = True
-        distance_from_recoding = 200
+        distance_in_recoding_sites = 100
 
         for strong_levels in strong_levels_list:
             for weak_levels in weak_levels_list:
@@ -1241,14 +1243,14 @@ if __name__=='__main__':
                     model.expected_mutations_distribution(ancestor,intermediate,leaf,leaf_nucl=leaf_mutated_nucl,non_edited_leaves=[],
                                                           weak_levels=weak_levels,strong_levels=strong_levels,sites_recalculation=False,
                                                           filter_internucl_for_edit_condition=filter_adeno_w_edit_condition,only_recoded_genes=only_recoded_genes,
-                                                          distance_from_recoding=distance_from_recoding,optimize_adaptive_rate=False,adaptive_rate=0.0)
+                                                          distance_from_recoding=distance_in_recoding_sites,optimize_adaptive_rate=False,adaptive_rate=0.0)
                     for perc in percentiles_list:
                         print('Adaptive model - editing levels method: '+editing_level_method+' strong levels:'+str(strong_levels)+' weak_levels:'+str(weak_levels)+'. Optimized adaptive rate for percentile '+str(perc))
                         try:
                             model.expected_mutations_distribution(ancestor,intermediate,leaf,leaf_nucl=leaf_mutated_nucl,non_edited_leaves=[],
                                                                   weak_levels=weak_levels,strong_levels=strong_levels,sites_recalculation=False,
                                                                   filter_internucl_for_edit_condition=filter_adeno_w_edit_condition,only_recoded_genes=only_recoded_genes,
-                                                                  distance_from_recoding=distance_from_recoding,optimize_adaptive_rate=True,percentile=perc)
+                                                                  distance_from_recoding=distance_in_recoding_sites,optimize_adaptive_rate=True,percentile=perc)
                         except ValueError as e:
                             print('Error while running adaptive model with optimizing adaptive rate mode:\n'+str(e))
                         model.adaptive_model.write_data(outpath, file_name=file_name, file_type='csv',data_to_write=['adaptive'])

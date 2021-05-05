@@ -851,7 +851,7 @@ def collect_results_for_general_model_and_plot_probs(path, recalc=True, iden_lis
                 plt.tick_params(axis='both', which='major', labelsize=25)  
                 plt.gca().spines['top'].set_visible(False)
                 plt.gca().spines['right'].set_visible(False)
-                plt.savefig(outpath+fig_name+'.jpg')
+                plt.savefig(outpath+fig_name+'.jpg', dpi=350)
                 plt.close()
                     
             return row
@@ -1458,7 +1458,7 @@ def rates_per_gene_analysis(path):
 
 
     columns = ('path','general_syn','general_nonsyn','edited_syn','edited_nonsyn',)
-    for n in [10, 50, 100, 150, 200]:
+    for n in [0,10, 50, 100, 150, 200]:
         columns+=('edited_syn_distance'+str(n),'edited_nonsyn_distance'+str(n),)
 
     data = []
@@ -1483,7 +1483,7 @@ def rates_per_gene_analysis(path):
 
         path_data = (name,general_syn_rate,general_nonsyn_rate,edited_syn_rate,edited_nonsyn_rate)
 
-        for n in [10,50,100,150,200]:
+        for n in [0,10,50,100,150,200]:
             distant_nucl_edited_syn_rate = sum(nonsyn_edited_df['leaf_'+str(n)+'_distant_syn_mut']) / float(sum(nonsyn_edited_df['intermediate_'+str(n)+'_distant_syn']))
             distant_nucl_edited_nonsyn_rate = sum(nonsyn_edited_df['leaf_'+str(n)+'_distant_nonsyn_mut']) / float(sum(nonsyn_edited_df['intermediate_'+str(n)+'_distant_nonsyn']))
             path_data+=(distant_nucl_edited_syn_rate,distant_nucl_edited_nonsyn_rate,)
@@ -1496,10 +1496,18 @@ def rates_per_gene_analysis(path):
 
 
 
+
 if __name__=='__main__':
 
-    path = 'D:/RNA_Editing_large_files_Backup_20201205/Phylogeny/Results_fixed/raxml_tree/coleoids/mut_per_gene_analysis/'
-    rates_per_gene_analysis(path)
+    rates_per_gene_analysis=False
+    hpm_results=False
+    adaptive_model_results = True
+    plot_adaptive_rates = False
+    calc_substitutions_form_ancestor = False
+
+    if rates_per_gene_analysis:
+        path = 'D:/RNA_Editing_large_files_Backup_20201205/Phylogeny/Results_fixed/raxml_tree/coleoids/mut_per_gene_analysis/'
+        rates_per_gene_analysis(path)
 
     if hpm_results:
         animals=['oct','bim','sep','squ','bob','lin']
@@ -1520,12 +1528,14 @@ if __name__=='__main__':
         path = 'D:/RNA_Editing_large_files_Backup_20201205/Phylogeny/Results_fixed/raxml_tree/all8/hpm/'
         rates_df, el_df = collect_results_for_hpm_and_plot_probs(path,animals,conserved_groups)
 
-    if general_model_results:
-        path = 'D:/RNA_Editing_large_files_Backup_20201205/Phylogeny/Results_fixed/oleg_tree/coleoids/adaptive/'
-        results_dfs_dict = collect_results_for_general_model_and_plot_probs(path, recalc=True)
-        path = 'D:/RNA_Editing_large_files_Backup_20201205/Phylogeny/Results_fixed/ncbi_tree/coleoids/adaptive/'
-        results_dfs_dict = collect_results_for_general_model_and_plot_probs(path, recalc=True)
-        path = 'D:/RNA_Editing_large_files_Backup_20201205/Phylogeny/Results_fixed/raxml_tree/coleoids/adaptive/'
+    if adaptive_model_results:
+        # path = 'D:/RNA_Editing_large_files_Backup_20201205/Phylogeny/Results_fixed/oleg_tree/coleoids/adaptive/'
+        # results_dfs_dict = collect_results_for_general_model_and_plot_probs(path, recalc=True)
+        # path = 'D:/RNA_Editing_large_files_Backup_20201205/Phylogeny/Results_fixed/ncbi_tree/coleoids/adaptive/'
+        # results_dfs_dict = collect_results_for_general_model_and_plot_probs(path, recalc=True)
+        # path = 'D:/RNA_Editing_large_files_Backup_20201205/Phylogeny/Results_fixed/raxml_tree/coleoids/adaptive/'
+        # results_dfs_dict = collect_results_for_general_model_and_plot_probs(path, recalc=True)
+        path = 'D:/RNA_Editing_large_files_Backup_20201205/Phylogeny/Results_fixed/raxml_tree/coleoids/adaptive_distant_nucl_mut/'
         results_dfs_dict = collect_results_for_general_model_and_plot_probs(path, recalc=True)
 
     if plot_adaptive_rates:
@@ -1546,7 +1556,6 @@ if __name__=='__main__':
         #                  'C:/Users/shosh/OneDrive/Desktop/RNA_Editing_large_files_Backup_20200906/Phylogeny/results/Sanchez/non_neural/4fold/edited_rows_from_4fold_non_neural_subset','non_neural'),
         #                  ('C',([0,0.1],[0.1,1],[0,1]),[('sep','oct'),('sep','bim'),('squ','oct'),('squ','bim'),('bob','oct'),('bob','bim'),('lin','oct'),('lin','bim')],['sep','squ','bob','lin','oct','bim'],'all8_rooted',
         #                  'C:/Users/shosh/OneDrive/Desktop/RNA_Editing_large_files_Backup_20200906/Phylogeny/results/Sanchez/neural/4fold/edited_rows_from_4fold_neural_subset','neural')
-        #
         #                  ]
 
         params_groups = [
