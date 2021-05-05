@@ -98,12 +98,18 @@ use `run_msa_for_super_orthologs.py --help` for more parameteres options
 This command will first create `<output_dir_name>` in which it will stor fasta files contatining the different orthologous groups indicated from all_best_hits.txt.
 It will then invoke MSA processes (in this example - 30 in parallel) for each of the orthologous group and will stor the results in `<output_dir_name>/msa_results/`
 
-You can also use `run_msa_for_super_orthologs.py --help`
+You can also use `python run_msa_for_super_orthologs.py --help` for more parameters information
 
 You can also use `run_msa_for_super_orthologs_based_proteins_name.py` to group orthologous genes based on the protein name instead of inferring it from the all_best_hits.txt file
 
+##### Converstion of protein MSA to nucleotides MSA
+This stage is needed if you invoked the MSAs in protein level in the previous stage
 
+example command:
+`python run_pal2nal_for_super_orthologs_to_create_codon_msa.py -native_coding_mrnas <native_coding_mrnas> -o proteins_super_orthologs <output_dir_of_previous_stage>`
 
+This command will create fasta files contatining the mRNA coding sequences of the orthologous gene groups, and will create a subdirectory named `<output_dir_of_previous_stage>\codons_msa_results` in which it will store the converted MSAs in separated folders.
 
+use `python run_pal2nal_for_super_orthologs_to_create_codon_msa.py --help` for more parameters information
 
 
