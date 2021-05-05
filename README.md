@@ -113,3 +113,23 @@ This command will create fasta files contatining the mRNA coding sequences of th
 use `python run_pal2nal_for_super_orthologs_to_create_codon_msa.py --help` for more parameters information
 
 
+##### Running PAML for Ancestral Sequences Reconstruction (ASR)
+
+
+
+##### Parsing PAML results
+
+
+
+##### Building A DB of all MSA columns and editing events data
+
+
+
+### The Hypotheses Class
+
+
+
+
+
+
+
