@@ -91,6 +91,7 @@ note that some of the files names contain the species name - the substring of th
 You could consider a proteins based MSA as usually, in coding sequences, the protein structure is expected to be conserved along the phylogeny
 
 example command:
+
 `python run_msa_for_super_orthologs.py -parent_dir <project_directory> -o <output_dir_name> -animals <species_for_MSA> -program clu -msa_processes 30 -proteins_msa True`
 
 use `run_msa_for_super_orthologs.py --help` for more parameteres options
@@ -106,6 +107,7 @@ You can also use `run_msa_for_super_orthologs_based_proteins_name.py` to group o
 This stage is needed if you invoked the MSAs in protein level in the previous stage
 
 example command:
+
 `python run_pal2nal_for_super_orthologs_to_create_codon_msa.py -native_coding_mrnas <native_coding_mrnas> -o proteins_super_orthologs <output_dir_of_previous_stage>`
 
 This command will create fasta files contatining the mRNA coding sequences of the orthologous gene groups, and will create a subdirectory named `<output_dir_of_previous_stage>\codons_msa_results` in which it will store the converted MSAs in separated folders.
