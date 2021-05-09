@@ -147,6 +147,16 @@ This is a large table, but the columns names should be self explenatory.
 
 ## The Hypotheses Class
 
+This class contain several methods for the analysis of the RNA editing phenomenon along a phylogeny, based on the DB created in the above pipeline
+There are 2 main sub-classes within this class.
+the first one is for testing the harm-permitting-model (HPM) and the other is testing the adaptive editing model (AEM).
+Both model are described in [Aaptive proteom diversification by A-to-I RNA editing in cephalopods].
+
+See also the documentations hypotheses.py scripts for more information regarding the different methods.
+
+
+
+
 
 
 
