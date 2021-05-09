@@ -31,6 +31,7 @@ except ImportError:
     print('Could not Import data-viz libraries')
 
 from src.hypotheses_test import *
+from src.build_full_tree_nucl_matrix import read_editing_sites_tbl, read_trinity_mrna_files
 
 try:
     from StringIO import StringIO ## for Python 2
@@ -393,39 +394,6 @@ def collect_results_for_anacestral_state_hpm_and_plot_probs(path,animals,conserv
     rates_claced.to_excel(path+'editing_types_rates_weak.xlsx')
     rates_claced = plot_rates_grouped_bars(path,rates.loc[conserved_groups,:],'conserved_sites_weak','Weak sites')
     rates_claced.to_excel(path+'conserved_editing_types_rates_weak.xlsx')
-
-
-def read_editing_sites_tbl(editing_sites_file, mm_type = 'AG'):
-    """
-    read the editing sites tabel
-    """
-    col_names = ['id', 'protein', 'location', 'mm_type', 'DNA_A', 'DNA_T', 'DNA_G', 'DNA_C',
-                 'RNA_A', 'RNA_T', 'RNA_G', 'RNA_C', 'Trinity', 'RNA_coverage', 'DNA_coverage', 
-                 'p_val', 'AA_before', 'AA_after', 'type', 'protein_length', 'editing_level', 'strand']
-    sites_df = pd.read_csv(editing_sites_file, sep = '\t', names = col_names, index_col = None)
-    sites_df = sites_df[sites_df['mm_type'] == mm_type]
-    
-    return sites_df
-
-
-def read_trinity_mrna_files(trinity_file):
-    """
-    read relevat information from transcriptome file
-    """
-    data = []
-    col_names = ['id','protein','protein_name','orfs_start','orfs_end','strand','sequence']
-    
-    for record in SeqIO.parse(open(trinity_file, "r"), "fasta"):
-        rec_data = record.description.split('\t')
-        if rec_data[0][-1] == ' ':  #some fastafiles have spaces after each id, so fixing it here.
-            rec_data[0] = rec_data[0].replace(' ','')
-        protein = rec_data[-1].split('|')[2].split(' ')[0]   #reading proteing from description assuming it was added to header using the transcriptome built pipeline we have for trinity
-        rec_data = (rec_data[0],protein,protein.split('_')[0],int(rec_data[2]),int(rec_data[4]),rec_data[6],record.seq)
-        data.append(rec_data)
-    
-    df = pd.DataFrame(data = data, columns = col_names)
-    
-    return df
 
 
 def draw_tree(tree_str,out_path):

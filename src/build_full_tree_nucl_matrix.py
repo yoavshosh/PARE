@@ -83,11 +83,16 @@ def read_editing_sites_tbl(editing_sites_file, mm_type = 'AG'):
     """
     read the editing sites tabel
     """
-    col_names = ['id', 'protein', 'location', 'mm_type', 'DNA_A', 'DNA_T', 'DNA_G', 'DNA_C',
-                 'RNA_A', 'RNA_T', 'RNA_G', 'RNA_C', 'Trinity', 'RNA_coverage', 'DNA_coverage', 
-                 'p_val', 'AA_before', 'AA_after', 'type', 'protein_length', 'editing_level', 'strand']
-    sites_df = pd.read_csv(editing_sites_file, sep = '\t', names = col_names, index_col = None)
-    sites_df = sites_df[sites_df['mm_type'] == mm_type]
+    try:
+        col_names = ['id', 'protein', 'location', 'mm_type', 'DNA_A', 'DNA_T', 'DNA_G', 'DNA_C',
+                     'RNA_A', 'RNA_T', 'RNA_G', 'RNA_C', 'Trinity', 'RNA_coverage', 'DNA_coverage',
+                     'p_val', 'AA_before', 'AA_after', 'type', 'protein_length', 'editing_level', 'strand']
+        sites_df = pd.read_csv(editing_sites_file, sep = '\t', names = col_names, index_col = None)
+    except:
+        sites_df = pd.read_csv(editing_sites_file, sep='\t', index_col=None)
+
+    if mm_type is not None:
+        sites_df = sites_df[sites_df['mm_type'] == mm_type]
     
     return sites_df
 
