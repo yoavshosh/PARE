@@ -27,7 +27,7 @@ note that some of the files names contain the species name - the substring of th
 
 #### 1. Transcriptomes and Editomes:
 You can use your own pipeline for the editing detection and transcriptome assambly.
-but you will have to adjust the fasta files containing the transcripts and the the tsv files that contain the editing events data for each species
+In any case, you will have to adjust the fasta files containing the transcripts and the the tsv files that contain the editing events data for each species
 to match the specific headers/fields pattern (see exmp_files).
 For the building of this pipeline we have used [Trinity](https://github.com/trinityrnaseq/trinityrnaseq/wiki) for the transcriptome assambly and BLASTx(https://blast.ncbi.nlm.nih.gov/Blast.cgi) to infer the ORFS of the assambled Trinity transcripts.
 see [This paper](https://www.sciencedirect.com/science/article/pii/S0092867417303446) for more information regarding the differents stages used to obtain the transcriptomes and editomes of the differnet species.
