@@ -9,7 +9,7 @@ in order to obtain the ancestral sequences and a DB of MSA data (including ances
 All scripts were developed in [python3.8](https://www.python.org/downloads/release/python-380/) but should be compatibale also with some python2 enviorments
 
 
-### Prerequisits
+## Prerequisits
 
 1. Python 3.6 or higher. including [Biopython](https://biopython.org/docs/1.75/api/Bio.html)
 
@@ -20,9 +20,12 @@ All scripts were developed in [python3.8](https://www.python.org/downloads/relea
 4. [PAML](http://abacus.gene.ucl.ac.uk/software/paml.html) softwares package
 
 
-### Data inputs
+## Data inputs
 
-##### 1. Transcriptomes and Editomes:
+You should prepare your project directory in a similar manner to the exmp_files directory before executing the pipeline, including the sub-directories and file names
+note that some of the files names contain the species name - the substring of the species name is of course changeable and should match your species name
+
+#### 1. Transcriptomes and Editomes:
 You can use your own pipeline for the editing detection and transcriptome assambly.
 but you will have to adjust the fasta files containing the transcripts and the the tsv files that contain the editing events data for each species
 to match the specific headers/fields pattern (see exmp_files).
@@ -54,12 +57,12 @@ An example of the editing sites table (headers names are not necessary in the ac
 |comp104833_c0_seq1	|Q9EPA7	|	40	 |  AG	 |	0	 |	0	 |	0	 |	0	 |	0	 |	2	 |	0	 |	2	 |	C	 |	4		    |		0	   |5.9920029999999e-06|	T		  |	T		|type2|	213			 |	0.5					|	-	|
 |comp113506_c0_seq1	|E9Q3S4	|	57	 |  AG	 |	2	 |	0	 |	0	 |	0	 |	3	 |	0	 |	3	 |	0	 |	A	| 	6	   	    |		2	   |0.00025			   |	E		  |	E		|type2|	204			 |	0.5					|	+	|
 
-Actually, the really important fields here are [id,protein,location,mm_type,editing_level,strand]. The other information in the table is not mandatory and can be filled with an arbitrary value in case you are missing it.
+Actually, the really mandatory fields here are [id,protein,location,mm_type,editing_level,strand]. If you don't have a table in the exact format above, you should include the fields' headers in the first line of the table file (separated by tabs).
 
 Note that the data in this table (including positions) is relative to the full mRNA sequences (from the transcriptomes), and not relative to the coding sequence which is only a translated region of the transcript, indicated from the strand and the ORFs data in the transcript header.
 
 
-##### 2. Orthologous gene groups data:
+#### 2. Orthologous gene groups data:
 Also you will have to provide data regarding the the orthologous genes in the different transcripts.
 You can use [OrthoMCL](https://orthomcl.org/orthomcl/app) to obtain this or use other packages for this task
 Anyhow| you should eventually end up with a file containing all the pairs of orthologous genes (transcripts) of each pair of species among the species you have.
@@ -77,24 +80,21 @@ The score of each paring here is not needed for the pipline. It is just the outp
 you can fill it with an arbitrary value if you dont have any score for you orthologs pairing 
 
 
-##### 3. Tree topology
-You can have your evolutionary tree topology in a newick format (see exmp_files)
-If you need to infer the topology yourself| you can use [RAxML-NG](https://github.com/amkozlov/raxml-ng) or other software preferred by you.
-see tree.txt in exmp_files for an example
+#### 3. Tree topology
+You can have your evolutionary tree topology in a newick format (see tree.txt in exmp_files for an example).
+If you need to infer the topology yourself you can use [RAxML-NG](https://github.com/amkozlov/raxml-ng) or other softwares for that.
 
-You should prepare your project directory in a similar manner to the exmp_files directory before executing the pipeline, including the sub-directories and file names
-note that some of the files names contain the species name - the substring of the species name is of course changeable and should match your species name
 
-### The pipeline
+## The pipeline
 
-##### Multiple MSA procedures of the different orthologous groups. 
-You could consider a proteins based MSA as usually, in coding sequences, the protein structure is expected to be conserved along the phylogeny
+On each command, you can use `--help` for more information
+
+#### Multiple MSA procedures of the different orthologous groups. 
+You should consider a proteins based MSA as usually, in coding sequences, the protein structure is expected to be conserved along the phylogeny
 
 example command:
 
 `python run_msa_for_super_orthologs.py -parent_dir <project_directory> -o <output_dir_name> -animals <species_for_MSA> -program clu -msa_processes 30 -proteins_msa True`
-
-use `run_msa_for_super_orthologs.py --help` for more parameteres options
 
 This command will first create `<output_dir_name>` in which it will stor fasta files contatining the different orthologous groups indicated from all_best_hits.txt.
 It will then invoke MSA processes (in this example - 30 in parallel) for each of the orthologous group and will stor the results in `<output_dir_name>/msa_results/`
@@ -103,7 +103,7 @@ You can also use `python run_msa_for_super_orthologs.py --help` for more paramet
 
 You can also use `run_msa_for_super_orthologs_based_proteins_name.py` to group orthologous genes based on the protein name instead of inferring it from the all_best_hits.txt file
 
-##### Converstion of protein MSA to nucleotides MSA
+#### Converstion of protein MSA to nucleotides MSA
 This stage is needed if you invoked the MSAs in protein level in the previous stage
 
 example command:
@@ -112,22 +112,40 @@ example command:
 
 This command will create fasta files contatining the mRNA coding sequences of the orthologous gene groups, and will create a subdirectory named `<output_dir_of_previous_stage>\codons_msa_results` in which it will store the converted MSAs in separated folders.
 
-use `python run_pal2nal_for_super_orthologs_to_create_codon_msa.py --help` for more parameters information
+
+#### Running PAML for Ancestral Sequences Reconstruction (ASR)
+
+Now, when we have all the codon-wise MSA's for all the super orthologs, we shall execute codeML software from the PAML package to perform the ASR
+
+example command:
+
+`python run_paml_codeml_for_super_orthologs.py -msa_dirs_path <path to the codonwise MSAs parent directory> -tree <tree file path> -codeml_processes 50`
+
+This command will invoke 50 codeml processes at once analyzing the MSAs and performing the phylogenetic analysis and ASR
+
+If you are not working on protein coding sequences, you may consider invoking baseml instead using the `run_paml_baseml_for_super_orthologs.py` module
 
 
-##### Running PAML for Ancestral Sequences Reconstruction (ASR)
+After this process is done, you will have the PAML results in each separate directory of each MSA. you should parse those results to create an MSA with ancestral sequences
+as well as some other data files in a more convenient format
+use this command:
+
+`python parse_paml_codeml_output.py -msa_dirs_path <path to the codonwise MSAs parent directory> -tree <tree file path>`
+
+#### Building A DB of all MSA columns and editing events data
+
+Now, we should build a DB combining the data from all the MSAs columns + the editing sites data
+exmple command:
+
+`python build_full_tree_nucl_matrix.py -parent_dir <your project directory> -super_orthologs_msa_dir <orthologous gene groups sub-dir> -animal <a list of species names> -ancestors <a list of ancestral nodes names> -threads 10`
+
+This command will create one large table combining all the MSAs columns data together with data regarding RNA events in each columns for each species.
+It will also create columns containing data regarding the MSA quality (based on agreement with consensus of adjuscent columns) and the ASR quality in each position (based on PAML paresed results)
+
+This is a large table, but the columns names should be self explenatory.
 
 
-
-##### Parsing PAML results
-
-
-
-##### Building A DB of all MSA columns and editing events data
-
-
-
-### The Hypotheses Class
+## The Hypotheses Class
 
 
 
