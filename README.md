@@ -150,7 +150,7 @@ This is a large table, but the column names should be self explanatory.
 This class contains several methods for the analysis of the RNA editing phenomenon along a phylogeny, based on the DB created in the above pipeline
 There are 2 main subclasses within this class.
 the first one is for testing the harm-permitting-model (HPM) and the other is testing the adaptive editing model (AEM).
-Both models are described in [Adaptive proteome diversification by A-to-I RNA editing in cephalopods].
+Both models are described in [Adaptive proteome diversification by A-to-I RNA editing in cephalopods](https://doi.org/10.1093/molbev/msab154).
 
 See also the documentations hypotheses.py scripts for more information regarding the different methods.
 
