@@ -644,8 +644,7 @@ def collect_results_for_hpm_and_plot_probs(path,animals,conserved_groups=None):
     plot_editing_levels_distributions_by_types(path,el_by_types_dict,animals,'all',0.4)
     if conserved_groups is not None:
         plot_editing_levels_distributions_by_types(path,el_by_types_dict,conserved_groups,'conserved',1)    
-    
-    
+
     return rates_dict, el_by_types_dict
 
 
@@ -711,7 +710,7 @@ def collect_results_for_general_model_and_plot_probs(path, recalc=True, iden_lis
         df['p']=df.apply(pd.to_numeric, errors='coerce')['p']
         pivot_df = df.pivot("branches", "levels_bounds_and_leaves", "p")
         plt.figure(figsize=(45,12))
-        ax = sns.heatmap(pivot_df,annot=True,vmin=0.0, vmax=0.1,cmap='coolwarm',linewidths=.5)
+            ax = sns.heatmap(pivot_df,annot=True,vmin=0.0, vmax=0.1,cmap='coolwarm',linewidths=.5)
         ax.set_yticklabels(ax.get_yticklabels(), rotation=0)
         plt.savefig(path+title+'.png')
         plt.close()
